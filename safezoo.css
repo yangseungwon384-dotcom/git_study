@@ -1,0 +1,412 @@
+@import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css");
+
+:root {
+  --bg: #141414;
+  --panel: #232323;
+  --accent: #e50914;
+  --text: #ffffff;
+  --muted: #b3b3b3;
+  --green: #46d369;
+}
+
+.gradio-container {
+  background: var(--bg) !important;
+  color: var(--text) !important;
+  font-family: "Pretendard", "Noto Sans KR", Arial, sans-serif !important;
+  max-width: 1280px !important;
+  margin: 0 auto !important;
+  padding: 0 !important;
+}
+
+.gradio-container .main,
+.gradio-container .wrap,
+footer.svelte-1lyswbr {
+  background: var(--bg) !important;
+}
+
+/* 상단 헤더 */
+.sz-header {
+  display: flex;
+  align-items: center;
+  gap: 40px;
+  padding: 24px 5%;
+  background: linear-gradient(#000c, transparent);
+}
+
+.sz-logo {
+  color: var(--accent);
+  font-size: 30px;
+  font-weight: 900;
+  letter-spacing: -1.5px;
+  text-decoration: none;
+}
+
+.sz-nav {
+  display: flex;
+  gap: 24px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.sz-nav a {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.sz-nav a:hover,
+.sz-nav a.active {
+  color: white;
+}
+
+.sz-demo-label {
+  margin-left: auto;
+  padding: 6px 12px;
+  border: 1px solid #ffffff40;
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* 히어로 */
+.sz-hero {
+  min-height: 280px;
+  display: flex;
+  align-items: center;
+  padding: 40px 5% 48px;
+  background:
+    linear-gradient(0deg, var(--bg), transparent 70%),
+    linear-gradient(90deg, #000e, #0003),
+    linear-gradient(135deg, #24352d, #141414);
+  margin-bottom: 8px;
+}
+
+.sz-hero-content {
+  max-width: 680px;
+}
+
+.sz-eyebrow {
+  color: var(--green);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 3px;
+}
+
+.sz-hero h1 {
+  margin: 16px 0;
+  font-size: clamp(32px, 4.5vw, 56px);
+  line-height: 1.15;
+  letter-spacing: -2px;
+  color: var(--text);
+  font-weight: 800;
+}
+
+.sz-hero p {
+  max-width: 520px;
+  color: #ddd;
+  font-size: 17px;
+  line-height: 1.7;
+  margin: 0;
+}
+
+.sz-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.sz-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 22px;
+  border: 0;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 14px;
+  text-decoration: none;
+  transition: background 0.2s;
+}
+
+.sz-btn-primary {
+  background: white;
+  color: #141414;
+}
+
+.sz-btn-primary:hover {
+  background: #ddd;
+}
+
+.sz-btn-secondary {
+  background: #ffffff26;
+  color: white;
+}
+
+.sz-btn-secondary:hover {
+  background: #ffffff40;
+}
+
+/* 카메라 카드 */
+.sz-section {
+  padding: 0 5% 28px;
+}
+
+.sz-section h2 {
+  margin: 0 0 16px;
+  font-size: 22px;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.sz-camera-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.sz-camera-card {
+  overflow: hidden;
+  border: 1px solid #ffffff14;
+  border-radius: 8px;
+  background: var(--panel);
+  transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+}
+
+.sz-camera-card:hover {
+  transform: translateY(-6px);
+  border-color: #ffffff55;
+  box-shadow: 0 16px 32px #0008;
+}
+
+.sz-camera-preview {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  background: linear-gradient(135deg, #33483d, #17201c);
+  color: #c5d1ca;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.sz-camera-card:nth-child(2) .sz-camera-preview {
+  background: linear-gradient(135deg, #594529, #241c12);
+}
+
+.sz-camera-card:nth-child(3) .sz-camera-preview {
+  background: linear-gradient(135deg, #3d5060, #17202a);
+}
+
+.sz-camera-card:nth-child(4) .sz-camera-preview {
+  background: linear-gradient(135deg, #513336, #261719);
+}
+
+.sz-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  padding: 5px 8px;
+  border-radius: 3px;
+  background: #000b;
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.sz-badge.live {
+  background: var(--accent);
+}
+
+.sz-camera-info {
+  padding: 16px;
+}
+
+.sz-camera-info h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  color: var(--text);
+}
+
+.sz-camera-info p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* 안전 알림 패널 */
+.alert-panel {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 20px 24px;
+  border-left: 4px solid var(--accent);
+  border-radius: 6px;
+  background: #24181a;
+  margin: 0 5% 20px;
+}
+
+.alert-panel.ok {
+  border-left-color: var(--green);
+  background: #18241c;
+}
+
+.alert-icon {
+  color: #ff6068;
+  font-size: 30px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.alert-panel.ok .alert-icon {
+  color: var(--green);
+}
+
+.alert-panel h3 {
+  margin: 0 0 8px;
+  font-size: 17px;
+  color: var(--text);
+}
+
+.alert-panel p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.sz-footer {
+  padding: 24px 5%;
+  border-top: 1px solid #ffffff14;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 12px;
+}
+
+/* Gradio 컴포넌트 다크 톤 */
+.panel-box {
+  border: 1px solid #ffffff14 !important;
+  border-radius: 8px !important;
+  padding: 14px 16px !important;
+  background: var(--panel) !important;
+  color: var(--text) !important;
+}
+
+.panel-box h3,
+.panel-box h4,
+.panel-box p,
+.panel-box li,
+.panel-box strong {
+  color: var(--text) !important;
+}
+
+.dark-tabs .tab-nav button {
+  color: var(--muted) !important;
+  background: transparent !important;
+  border: none !important;
+  font-weight: 600 !important;
+}
+
+.dark-tabs .tab-nav button.selected {
+  color: white !important;
+  border-bottom: 2px solid var(--accent) !important;
+}
+
+.dark-tabs .tabitem {
+  background: transparent !important;
+  border: none !important;
+  padding-top: 16px !important;
+}
+
+button.primary,
+.gr-button-primary {
+  background: white !important;
+  color: #141414 !important;
+  border: 0 !important;
+  border-radius: 4px !important;
+  font-weight: 700 !important;
+}
+
+button.primary:hover {
+  background: #ddd !important;
+}
+
+textarea,
+input,
+.gr-textbox textarea,
+.gr-textbox input {
+  background: var(--panel) !important;
+  color: var(--text) !important;
+  border: 1px solid #ffffff22 !important;
+  border-radius: 6px !important;
+}
+
+label,
+.svelte-1gfkn6j,
+.block .label-wrap span {
+  color: var(--muted) !important;
+}
+
+table,
+.dataframe,
+.dataframe th,
+.dataframe td {
+  background: var(--panel) !important;
+  color: var(--text) !important;
+  border-color: #ffffff14 !important;
+}
+
+.dataframe thead th {
+  color: var(--muted) !important;
+}
+
+footer {
+  display: none !important;
+}
+
+@media (max-width: 1000px) {
+  .sz-camera-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sz-header {
+    gap: 24px;
+  }
+
+  .sz-nav {
+    gap: 16px;
+  }
+}
+
+@media (max-width: 600px) {
+  .sz-header {
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+
+  .sz-logo {
+    font-size: 26px;
+  }
+
+  .sz-nav {
+    order: 3;
+    width: 100%;
+  }
+
+  .sz-camera-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .alert-panel {
+    align-items: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sz-camera-card,
+  .sz-btn {
+    transition: none;
+  }
+
+  .sz-camera-card:hover {
+    transform: none;
+  }
+}
