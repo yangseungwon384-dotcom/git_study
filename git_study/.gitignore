@@ -1,0 +1,8 @@
+﻿config/
+.venv/
+__pycache__/
+*.pyc
+zoo_safe/zoo_jev_data/
+zoo_safe/zoo_jev_data_new/
+logs/
+snapshots/

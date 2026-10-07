@@ -1,0 +1,8 @@
+# Git 학습 프로젝트[cite: 49]
+
+이 프로젝트는 **Git과 GitHub** 사용법을 연습하는 저장소입니다.[cite: 49]
+
+## 주요 명령어[cite: 49]
+* `git status` : 상태 확인[cite: 50, 53]
+* `git add` : 스테이징 영역에 올리기[cite: 53]
+* `git commit` : 버전 저장하기[cite: 53]
