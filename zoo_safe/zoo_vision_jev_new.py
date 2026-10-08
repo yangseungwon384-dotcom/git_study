@@ -260,7 +260,7 @@ def questions(with_score=False):
         },
         'needs_immediate_review': {
             'type': 'noul',
-            'instructions': 'Under the supplied policy, should an operator verify this event now '
+            'instructions': 'Under the supplied policy, should an operator vhttp://127.0.0.1:7863/erify this event now '
                             'rather than wait for routine review? This is notification, not physical intervention.',
             'criteria': {'true': 'Prompt operator verification is warranted.',
                          'false': 'Evidence supports waiting for routine review.'},
@@ -362,6 +362,9 @@ class Database:
             db.execute("UPDATE events SET active=0, ended_at=?, end_reason='server_restart' WHERE active=1",
                        (now().isoformat(),))
             db.execute("UPDATE decisions SET status='interrupted' WHERE status IN ('pending','running')")
+        from dashboard_store import bind
+        bind(Database)
+        self.migrate()
 
     @contextmanager
     def connect(self):
@@ -389,8 +392,10 @@ class Database:
                    message=message or '구역 규칙 위반 관측: 담당자 확인 필요 (탈출 확정 아님)',
                    snapshot_path=str(path),confidence=round(confidence,3))
         with self.connect() as db:
-            db.execute('INSERT INTO events VALUES(?,?,?,?,?,?,?)',
-                       (eid,date.date().isoformat(),cid,1,json.dumps(row,ensure_ascii=False),None,None))
+            db.execute(
+                'INSERT INTO events(id, day, camera, active, row_json, ended_at, end_reason) '
+                'VALUES(?,?,?,?,?,?,?)',
+                (eid, date.date().isoformat(), cid, 1, json.dumps(row, ensure_ascii=False), None, None))
         return eid
 
     def end(self, eid, reason):
@@ -421,7 +426,9 @@ class Database:
     def record_request(self, job, args, status):
         """JEV에 보내기 직전의 요청을 기록한다. --jev가 없으면 status는 disabled."""
         with self.connect() as db:
-            db.execute('INSERT INTO decisions VALUES(?,?,?,?,?,?,?,?,?,?)',(
+            db.execute(
+                'INSERT INTO decisions(id, event_id, requested_at, status, state_json, result_json, '
+                'error, model_requested, question_version, questions_json) VALUES(?,?,?,?,?,?,?,?,?,?)', (
                 job['id'],job['event'],now().isoformat(),status,
                 json.dumps(job['state'],ensure_ascii=False),None,None,args.jev_model,
                 QUESTION_VERSION,json.dumps(questions(args.score))))
@@ -538,7 +545,10 @@ class LinkedAnalyzer:
                 roi_version=cfg.get('version',0) if cfg else 0,frame=None,rendered=None,
                 native_size=None,seq=0,stamp=0.,observed_at=None,video_sec=0.,
                 box_tracker=IoUTracker(),tracker_session=None,error='',analysis_fps=0.,last_analysis=0.,
-                alerted=set(),banner_text='',banner_until=0.)
+                alerted=set(),banner_text='',banner_until=0.,show_roi=True)
+        from dashboard_store import default_gate
+        self.fallback_gate = default_gate(args)
+        self.gates = self.db.load_gates(self.fallback_gate)
         self.model = None
         self.worker = JevWorker(self)
         self.threads = []
@@ -672,7 +682,7 @@ class LinkedAnalyzer:
                         if finished-stamp>self.args.max_gap:
                             r['error']='분석 지연: 화면은 갱신하고 경고 판단은 보류'
                             continue
-                        self.observe(cid,detections,frame,stamp,observed_at,video_sec,cfg)
+                        self.observe(cid,detections,frame,stamp,observed_at,video_sec,cfg,r['seq'])
                         r['error']=''
                 except Exception as exc:
                     with self.lock:
@@ -707,20 +717,42 @@ class LinkedAnalyzer:
         h,w=frame.shape[:2];detections=[]
         poly=self.pixel_polygon(cfg,w,h)
         enabled=bool(cfg and cfg.get('enabled') and poly is not None)
+        exclude=self.pixel_polygon({'polygon': cfg.get('exclude_polygon')}, w, h) if cfg else None
+        exclude_on=bool(cfg and cfg.get('exclude_reviewed') and exclude is not None)
+        if exclude_on:
+            kept=[]
+            for det in raw:
+                fx,fy=self.original.zs.anchor_xy(det['bbox'],h)
+                if self.original.zs.in_poly(fx,fy,exclude):
+                    continue
+                kept.append(det)
+            raw=kept
         margin=self.original.zs.BOTTOM_MARGIN
+        from dashboard_policy import zone_relation
+        short=min(w,h)
         for det in r['box_tracker'].update(raw):
-            name=det['name'];x1,y1,x2,y2=det['bbox']
+            name=det['name']
             fx,fy=self.original.zs.anchor_xy(det['bbox'],h)
             point=(fx/max(w-1,1),fy/max(h-1,1))
             inside=bool(self.original.zs.in_poly(fx,fy,poly)) if enabled else None
             at_bottom=fy>=h-margin
+            gate=self.gate_for(r['cam']['cam_id'], name)
+            signed=None
+            if enabled:
+                import cv2
+                signed=float(cv2.pointPolygonTest(poly,(float(fx),float(fy)),True))
+            relation=zone_relation(
+                signed, gate.boundary_norm*short, at_bottom,
+                bool(r['cam'].get('alert_on_exit')) and name!='person') if enabled else 'unknown'
             zone,inside,danger=classify_subject(
                 name,inside,at_bottom,enabled=enabled,
                 alert_on_exit=bool(r['cam'].get('alert_on_exit')),
                 person_inside=bool(cfg and cfg.get('person_inside')))
+            if relation=='boundary':
+                zone,danger='BOUNDARY',False
             detections.append(dict(track_id=det['track_id'],name=name,confidence=det['confidence'],
                                    bbox=det['bbox'],anchor=point,inside=inside,danger=danger,zone=zone,
-                                   at_bottom=at_bottom))
+                                   at_bottom=at_bottom,relation=relation))
         return detections
 
     def pixel_polygon(self, cfg, w, h):
@@ -730,73 +762,77 @@ class LinkedAnalyzer:
             return None
         return (np.asarray(cfg['polygon'],np.float32)*[w-1,h-1]).astype(np.int32)
 
-    def observe(self,cid,detections,frame,stamp,observed_at,video_sec,cfg):
-        """락을 잡은 상태에서 호출된다. 경과 시간은 처리 시각이 아니라 프레임이 찍힌 시각으로 센다.
-        기린 카메라에서 SAFE→DANGER로 바뀌면 1초를 기다리지 않고 바로 알림을 만든다.
+    def gate_for(self, cid, name):
+        """저장된 카메라·클래스 기준. 없으면 시연용 기본값이다."""
+        return self.gates.get((cid, name), self.fallback_gate)
+
+    def observe(self,cid,detections,frame,stamp,observed_at,video_sec,cfg,frame_key=None):
+        """락을 잡은 상태에서 호출된다. 경과 시간은 프레임이 찍힌 단조 시각으로 센다.
+
+        후보 한 장만으로 사건을 만들지 않는다. 안전 쪽이 확인된 객체의 명확한 이탈은 바로 연다.
+        처음부터 밖에서 보인 후보는 확인 시간이 지난 뒤에만 연다. AI 답은 이 경고를 끄지 않는다.
         """
+        from dashboard_policy import ObjectWatch
         r=self.runtime[cid];tracks=r['tracks']
+        person_inside=bool(cfg and cfg.get('person_inside'))
         person_present=any(d['name']=='person' for d in detections)
         for d in detections:
             tid=d['track_id'];s=tracks.get(tid)
-            # 같은 ID라도 오래 비었거나 클래스(기린↔사람)가 바뀌면 다른 물체로 본다.
             if s and (stamp-s['last']>self.args.max_gap or s['name']!=d['name']):
                 if s['event']:self.db.end(s['event'],'track_gap_or_class_change')
                 del tracks[tid];s=None
             if s is None:
                 s=dict(last=stamp,name=d['name'],event=None,revision=0,danger=False,was_safe=False,
-                       pending=None,safe_since=None,history=deque(maxlen=64),
+                       pending=None,safe_since=None,history=deque(maxlen=64),watch=ObjectWatch(),
                        last_submit=-1e9,observed_signature=None,accepted_signature=None,
                        inflight=False,retries=0,zone='SAFE')
                 tracks[tid]=s
-            before=s.get('zone','SAFE')
-            after=d.get('zone') or ('DANGER' if d['danger'] else 'SAFE')
-            # 안전에서 위험으로 바뀐 순간만 즉시 경고. 안전 복귀 뒤 alerted에서 빠지면 다시 즉시 경고한다.
-            exited=bool(self.original.zs.is_zone_exit(before, after) and tid not in r['alerted'] and d['danger'])
-            s['zone']=after
+            gate=self.gate_for(cid,d['name'])
+            outcome=s['watch'].update(stamp,frame_key,d['confidence'],d.get('relation') or 'unknown',
+                                      gate,person_inside,d['name'])
+            if outcome['action']=='duplicate':
+                continue
             s['last']=stamp
+            s['history'].append((stamp,d['confidence']))
+            s['zone']=d.get('zone') or s['zone']
+            if s['watch'].last_clear=='risk':
+                if s['pending'] is None:s['pending']=stamp
+            else:
+                s['pending']=None
             if s['danger']!=d['danger']:
-                s['revision']+=1  # 위험 여부가 바뀌면 이미 보낸 JEV 요청은 즉시 무효다.
+                s['revision']+=1
                 s['inflight']=False
                 self.db.invalidate(s['event'])
             s['danger']=d['danger']
-            if d['danger']:
-                s['safe_since']=None
-                if s['pending'] is None:s['pending']=stamp;s['history'].clear()
-                s['history'].append((stamp,d['confidence']))
-                if exited:
-                    # 동물 이탈과 사람 진입은 문구가 다르다. 배너는 ALERT_HOLD_SEC 동안 유지한다.
-                    r['alerted'].add(tid)
-                    r['banner_text']=PERSON_ALERT_MSG if d['name']=='person' else self.original.zs.ALERT_MSG
-                    r['banner_until']=time.monotonic()+self.original.zs.ALERT_HOLD_SEC
-                confirmed=len(s['history'])>=2 and stamp-s['pending']>=self.args.confirm_sec
-                if s['event'] is None and (exited or confirmed):
-                    span=stamp-s['pending']
-                    if d['name']=='person':
-                        kind,message,zone='PERSON_INTRUSION',PERSON_ALERT_MSG,'안전구역_안'
-                    elif exited:
-                        kind,message,zone='ZONE_EXIT_DANGER',self.original.zs.ALERT_MSG,'철창밖_위험구역'
-                    else:
-                        kind='ZONE_EXIT' if s['was_safe'] else 'OUTSIDE_OBSERVED'
-                        message,zone=None,'ROI'
-                    s['event']=self.db.add_event(cid,tid,d['name'],d['confidence'],kind,frame,message,zone,
-                                                 judge_severity(kind,d['confidence'],span))
-                if s['event']:
-                    self.maybe_submit(r,cid,tid,s,d,cfg,observed_at,video_sec,person_present,stamp)
-            else:
-                # 안전으로 돌아오면 위험 누적을 지운다. 0.8초 이상 안전하면 사건을 닫고 재경고를 허용한다.
-                s['pending']=None;s['history'].clear()
-                if s['safe_since'] is None:s['safe_since']=stamp
-                if stamp-s['safe_since']>=.8:
+            if outcome['action']=='open' and s['event'] is None:
+                span=stamp-(s['pending'] if s['pending'] is not None else stamp)
+                if d['name']=='person':
+                    kind,message,zone='PERSON_INTRUSION',PERSON_ALERT_MSG,'안전구역_안'
+                elif outcome['kind']=='transition':
+                    kind,message,zone='ZONE_EXIT_DANGER',self.original.zs.ALERT_MSG,'철창밖_위험구역'
                     s['was_safe']=True
-                    r['alerted'].discard(tid)
-                    if s['event']:self.db.end(s['event'],'safe_return');s['event']=None
-                    s['accepted_signature']=None
-                    s['inflight']=False
-                    s['retries']=0
-        # 이번 프레임에 안 보인 트랙이 너무 오래되면 놓친 것으로 보고 사건을 닫는다.
+                else:
+                    kind,message,zone='OUTSIDE_OBSERVED',None,'ROI'
+                s['event']=self.db.add_event(cid,tid,d['name'],d['confidence'],kind,frame,message,zone,
+                                             judge_severity(kind,d['confidence'],span))
+                r['alerted'].add(tid)
+                r['banner_text']=message or self.original.zs.ALERT_MSG
+                r['banner_until']=time.monotonic()+self.original.zs.ALERT_HOLD_SEC
+            elif outcome['action']=='close' and s['event']:
+                self.db.end(s['event'],'safe_return')
+                s['event']=None
+                s['was_safe']=True
+                s['pending']=None
+                r['alerted'].discard(tid)
+                s['accepted_signature']=None
+                s['inflight']=False
+                s['retries']=0
+            if s['event'] and s['watch'].last_clear=='risk':
+                self.maybe_submit(r,cid,tid,s,d,cfg,observed_at,video_sec,person_present,stamp)
         for tid,s in list(tracks.items()):
             if stamp-s['last']>self.args.max_gap:
                 if s['event']:self.db.end(s['event'],'track_lost_not_confirmed_safe')
+                if s.get('watch'):s['watch'].mark_closed()
                 del tracks[tid]
 
     def maybe_submit(self,r,cid,tid,s,d,cfg,observed_at,video_sec,person_present,stamp):
@@ -867,8 +903,8 @@ class LinkedAnalyzer:
                 rendered=r['rendered']
                 shot=None if not rendered or rendered[3] is None else rendered[3].copy()
                 snapshots.append((r['frame'],deepcopy(r['cfg']),rendered,r['session'],
-                                  r['banner_text'],r['banner_until'],shot))
-        for frame,cfg,rendered,session,banner_text,banner_until,shot in snapshots:
+                                  r['banner_text'],r['banner_until'],shot,r.get('show_roi', True)))
+        for frame,cfg,rendered,session,banner_text,banner_until,shot,show_roi in snapshots:
             if frame is None and shot is None:out.append(None);continue
             age=time.monotonic()-rendered[0] if rendered else None
             fresh=bool(rendered and rendered[1]==session and shot is not None and age<=self.args.max_gap)
@@ -876,10 +912,14 @@ class LinkedAnalyzer:
             canvas=(shot if fresh else frame).copy()
             if canvas is None:out.append(None);continue
             h,w=canvas.shape[:2]
-            if cfg and cfg['polygon']:
+            if show_roi and cfg and cfg.get('polygon'):
                 pts=(np.asarray(cfg['polygon'])*[w-1,h-1]).astype(np.int32)
                 cv2.polylines(canvas,[pts],True,(0,220,230),2)
-            cv2.putText(canvas,roi_caption(cfg),(12,25),cv2.FONT_HERSHEY_SIMPLEX,.6,(0,220,230),2)
+                cv2.putText(canvas,roi_caption(cfg),(12,25),cv2.FONT_HERSHEY_SIMPLEX,.6,(0,220,230),2)
+            if show_roi and cfg and cfg.get('exclude_polygon'):
+                extra=(np.asarray(cfg['exclude_polygon'])*[w-1,h-1]).astype(np.int32)
+                cv2.polylines(canvas,[extra],True,(0,140,255),2)
+                cv2.putText(canvas,'탐지 제외',(12,48),cv2.FONT_HERSHEY_SIMPLEX,.6,(0,140,255),2)
             if fresh:
                 for d in rendered[2]:
                     x1,y1,x2,y2=d['bbox'];color=(0,0,255) if d['danger'] else (0,210,0)
@@ -997,253 +1037,10 @@ def load_original(path):
     return module
 
 
-def build_app(original,engine):
-    """zoo_vision 대시보드의 데이터 함수를 이 엔진으로 갈아끼우고, JEV 탭과 ROI 편집을 붙인다."""
-    import cv2
-    import gradio as gr
-    import numpy as np
-    import pandas as pd
-    # 원본 화면이 호출하는 함수들을, 파일 로그 대신 이 엔진의 DB/영상을 보게 바꾼다.
-    original.ANALYZER=engine
-    original.refresh_detect=engine.step_all
-    original.load_events=lambda: pd.DataFrame(engine.db.events(),columns=original.EVENT_COLS)
-    original.load_inbox=lambda: '\n'.join(
-        f"[{r['detected_at']}] {r['camera_id']} #{r['track_id']} {r['message']}"
-        for r in engine.db.events()[-30:]) or '오늘 알림 없음'
-    original.latest_snapshots=lambda n=6: [r['snapshot_path'] for r in engine.db.events()[-n:][::-1]]
-
-    def status(df):
-        """오른쪽 카메라 상태 문장. 오류, 영상 끊김, ROI 없음, 감시 중을 구분한다."""
-        alive=bool(engine.analyze_thread and engine.analyze_thread.is_alive())
-        if engine.boot_error:
-            thread='분석 스레드: 시작 실패 — '+engine.boot_error
-        elif not alive:
-            thread='분석 스레드: 중지됨'
-        elif engine.last_ok:
-            thread=f'분석 스레드: 동작 중 · 마지막 성공 {time.monotonic()-engine.last_ok:.1f}초 전'
-        else:
-            thread='분석 스레드: 동작 중 · 아직 성공한 분석 없음'
-        lines=['### 카메라 상태',thread,f'진행 중 규칙 경고: **{engine.db.active_count()}건**']
-        with engine.lock:
-            for r in engine.runtime.values():
-                cfg=r['cfg'];age=time.monotonic()-r['stamp']
-                state=r['error'] or ('영상 대기/끊김' if age>engine.args.max_gap else
-                    'ROI 미설정' if not cfg or not cfg['polygon'] else
-                    '감시 중' if cfg['enabled'] else 'ROI 감시 꺼짐')
-                lines.append(f"- {r['cam']['title']}: {state} · 분석 {r['analysis_fps']:.1f} FPS")
-        return '\n'.join(lines)
-    original.camera_status=status
-    def alert_banner(df):
-        """상단 경고. 지금 떠 있는 배너 문구를 우선하고, 없으면 오늘 마지막 사건을 보여 준다."""
-        with engine.lock:
-            live=next((r['banner_text'] for r in engine.runtime.values()
-                       if r['banner_text'] and time.monotonic()<r['banner_until']), '')
-        if live:
-            return '<div class="alert-panel"><h3>'+live+'</h3></div>'
-        rows=engine.db.events()
-        if rows:
-            last=rows[-1]
-            return ('<div class="alert-panel"><h3>'
-                    f"[{last.get('detected_at','')}] {last.get('severity','')} · {last.get('camera_id','')} · "
-                    f"{last.get('object','')} {last.get('event_type','')}</h3><p>{last.get('message','')}</p></div>")
-        return ('<div class="alert-panel"><h3>진행 중 경고 없음 — 영상·분석 연결 상태를 함께 확인하세요.</h3></div>')
-    original.alert_banner=alert_banner
-
-    def roi_frame(label):
-        """편집에 쓸 현재 프레임. 없으면 None."""
-        cam=next(c for c in original.CAMERAS if c['code']==label);r=engine.runtime[cam['cam_id']]
-        with engine.lock:
-            frame=None if r['frame'] is None else r['frame'].copy()
-            cfg=deepcopy(r['cfg'])
-        return frame,cfg
-
-    def roi_preview(label,points):
-        """찍은 점을 현재 화면 위에 다시 그린다."""
-        import cv2
-        frame,cfg=roi_frame(label)
-        if frame is None:
-            return None
-        rgb=cv2.cvtColor(frame,cv2.COLOR_BGR2RGB)
-        return paint_clicks(rgb,points)
-
-    def roi_open(label):
-        """선택한 카메라 화면을 열고, 저장된 구역이 있으면 그 꼭짓점을 보여 준다."""
-        frame,cfg=roi_frame(label)
-        if frame is None:
-            return None,[],False,False,False,'영상이 준비되지 않았습니다.'
-        h,w=frame.shape[:2]
-        points=[[float(x)*(w-1),float(y)*(h-1)] for x,y in cfg['polygon']] if cfg and cfg.get('polygon') else []
-        has_zone=bool(points)
-        note=('가장자리를 따라 클릭하세요. 점은 찍은 순서대로 이어집니다. '
-              '3개 이상이면 저장할 수 있고, 잘못 찍으면 마지막 점만 취소하면 됩니다.')
-        return (roi_preview(label,points),points,
-                bool(cfg['enabled']) if has_zone else True,
-                bool(cfg and cfg['person_inside']),bool(cfg and cfg['reviewed']),
-                f'점 {len(points)}개. '+note)
-
-    def roi_click(evt, points, label):
-        """화면을 클릭한 곳에 다음 꼭짓점을 추가한다."""
-        points=list(points or [])
-        frame,_=roi_frame(label)
-        if frame is None:
-            return None,points,'영상이 준비되지 않았습니다. 현재 화면 불러오기를 다시 누르세요.'
-        h,w=frame.shape[:2]
-        idx=getattr(evt,'index',None)
-        if not isinstance(idx,(list,tuple)) or len(idx)<2:
-            return roi_preview(label,points),points,'클릭 위치를 읽지 못했습니다.'
-        x,y=float(idx[0]),float(idx[1])
-        if not (0<=x<w and 0<=y<h):
-            return roi_preview(label,points),points,'화면 안쪽을 클릭하세요.'
-        points.append([x,y])
-        note='점 {}개.'.format(len(points))
-        if len(points)<3:
-            note+=' 가장자리를 따라 계속 클릭하세요.'
-        elif polygon_crosses(points):
-            note+=' 선이 교차합니다. 마지막 점을 취소하고 가장자리 순서로 다시 찍으세요.'
-        else:
-            note+=' 이 구역을 저장할 수 있습니다.'
-        return roi_preview(label,points),points,note
-
-    def roi_undo(points,label):
-        """마지막으로 찍은 점만 뺀다."""
-        points=list(points or [])[:-1]
-        frame,_=roi_frame(label)
-        if frame is None:
-            return None,points,'영상이 준비되지 않았습니다.'
-        return roi_preview(label,points),points,f'점 {len(points)}개. 마지막 점을 취소했습니다.'
-
-    def roi_clear(points,label):
-        """찍던 점을 모두 지운다. 저장하기 전까지 감시 중인 구역은 바뀌지 않는다."""
-        frame,_=roi_frame(label)
-        if frame is None:
-            return None,[],'영상이 준비되지 않았습니다.'
-        return roi_preview(label,[]),[],'점을 모두 지웠습니다. 가장자리부터 다시 클릭하세요.'
-
-    def roi_save(label,points,enabled,person_inside,reviewed):
-        """클릭한 꼭짓점을 안전구역으로 저장하고 그 카메라 추적을 리셋한다."""
-        cam=next(c for c in original.CAMERAS if c['code']==label);r=engine.runtime[cam['cam_id']]
-        try:
-            points=list(points or [])
-            with engine.lock:
-                if r['frame'] is None:raise ValueError('영상이 준비되지 않았습니다.')
-                if len(points)<3:raise ValueError('가장자리를 3곳 이상 클릭한 뒤 저장하세요.')
-                if polygon_crosses(points):raise ValueError('선이 교차합니다. 마지막 점을 취소하고 가장자리 순서로 다시 찍으세요.')
-                h,w=r['frame'].shape[:2]
-                pts=np.array([[int(round(p[0])),int(round(p[1]))] for p in points],np.int32)
-                if abs(cv2.contourArea(pts.astype(np.float32)))<10:raise ValueError('구역이 너무 좁습니다. 더 넓게 찍어 주세요.')
-                version=r['roi_version']+1
-                cfg=dict(polygon=(pts/[w-1,h-1]).tolist(),enabled=bool(enabled),
-                         person_inside=bool(person_inside),reviewed=bool(reviewed),version=version)
-                with engine.db.connect() as db:
-                    db.execute('INSERT OR REPLACE INTO roi VALUES(?,?)',(cam['cam_id'],json.dumps(cfg)))
-                engine.reset(r,'roi_changed');r['cfg']=cfg;r['roi_version']=version
-            return 'ROI 저장 완료. 이전 JEV 판단은 새 구역에 재사용하지 않습니다.'
-        except (ValueError,TypeError) as exc:return str(exc)
-
-    def jev_view():
-        """JEV 탭: 최신 판단을 한글 문장으로 보여주고, 원본 JSON은 접어 둔다."""
-        import html
-        titles={c['cam_id']:c['title'] for c in original.CAMERAS}
-        records=engine.db.latest();rows=[]
-        cards=[]
-        for item in records[:12]:
-            state=json.loads(item['state_json']) if item.get('state_json') else {}
-            response=json.loads(item['result_json']) if item.get('result_json') else {}
-            answers=response.get('answers') or {}
-            headline,lines,name,where,choice_ko=jev_brief(state,item.get('status'),answers)
-            place=titles.get(state.get('source',{}).get('camera_id'), state.get('source',{}).get('camera_id','카메라'))
-            ref=reference_label(item,engine.args.jev_ttl)
-            when=str(item.get('requested_at') or '')[11:19]
-            rows.append([when,place,name,where,STATUS_KO.get(item.get('status'), item.get('status')),
-                         choice_ko,ref,'진행 중' if item.get('event_active') else '종료됨'])
-            if len(cards)<1:
-                bullets=''.join(f'<li>{html.escape(line)}</li>' for line in lines)
-                badge='jev-now' if ref=='현재 참고' else 'jev-old'
-                err=html.escape(item.get('error') or '')
-                err_html=f'<p class="jev-error">{err}</p>' if err else ''
-                cards.append(
-                    '<div class="jev-card">'
-                    f'<p class="jev-kicker">{html.escape(place)} · {html.escape(when)} · '
-                    f'<span class="{badge}">{html.escape(ref)}</span></p>'
-                    f'<h2>{html.escape(headline)}</h2>'
-                    f'<ul>{bullets}</ul>{err_html}'
-                    '<p class="jev-note">이 판단은 참고입니다. 규칙 경고를 끄거나 설비를 움직이지 않습니다.</p>'
-                    '</div>')
-        if engine.args.jev and getattr(engine.args,'provider','')=='ollama':
-            mode=f'로컬 모델 {engine.args.jev_model}에 판단을 요청합니다.'
-        elif engine.args.jev:
-            mode='외부 API에 판단을 요청합니다.'
-        else:
-            mode='지금은 JSON만 만들고, 밖으로 보내지 않습니다.'
-        story=(cards[0] if cards else
-               '<div class="jev-card"><h2>아직 판단할 사건이 없습니다</h2>'
-               '<p>동물이 구역을 벗어나거나 사람이 구역 안에 있으면 여기에 한글로 요약됩니다.</p></div>')
-        story=f'<p class="jev-mode">{html.escape(mode)}</p>'+story
-        newest=records[0] if records else None
-        request={'model':engine.args.jev_model,'state':json.loads(newest['state_json']),
-                 'questions':questions(engine.args.score)} if newest else {}
-        response=json.loads(newest['result_json']) if newest and newest['result_json'] else {}
-        return story,rows,request,response
-
-    # 화면: 실시간 4채널, 통계, 사건 표는 원본 레이아웃. JEV 판단 탭만 여기 추가한다.
-    with gr.Blocks(title='SafeZoo · YOLO + JEV') as demo:
-        gr.HTML(original.header_html());gr.HTML(original.hero_html())
-        gr.Markdown('영상 재생·YOLO 분석은 백그라운드에서 동작합니다. JEV에는 사건 요약 JSON만 전송합니다.')
-        banner=gr.HTML()
-        with gr.Tabs():
-            with gr.Tab('실시간 감시'):
-                images=[]
-                for pair in (original.CAMERAS[:2],original.CAMERAS[2:]):
-                    with gr.Row():
-                        for cam in pair:
-                            images.append(gr.Image(label=cam['title'],height=280,interactive=False,format='jpeg'))
-                points=gr.State([])
-                with gr.Accordion('ROI 찍기',open=True):
-                    camera=gr.Dropdown([c['code'] for c in original.CAMERAS],value='CAMERA 01',label='카메라')
-                    get=gr.Button('현재 화면 불러오기')
-                    board=gr.Image(label='가장자리를 클릭하세요',type='numpy',interactive=False,
-                                   height=420,buttons=['fullscreen'])
-                    with gr.Row():
-                        undo=gr.Button('마지막 점 취소')
-                        clear=gr.Button('점 모두 지우기')
-                        save=gr.Button('이 구역 저장')
-                    enabled=gr.Checkbox(value=True,label='구역 감시 활성화')
-                    person=gr.Checkbox(label='사람이 ROI 안에 있으면 경고')
-                    reviewed=gr.Checkbox(label='운영자가 ROI 경계를 검토함')
-                    message=gr.Markdown('카메라를 고른 뒤 화면을 불러오고, 안전구역 가장자리를 순서대로 클릭하세요. 안쪽을 칠할 필요는 없습니다.')
-                    get.click(roi_open,camera,[board,points,enabled,person,reviewed,message])
-                    camera.change(roi_open,camera,[board,points,enabled,person,reviewed,message])
-                    # gr.SelectData 힌트는 이 함수가 함수 안에 있어 자동으로 인식되지 않는다.
-                    roi_click.__annotations__={'evt':gr.SelectData}
-                    board.select(roi_click,[points,camera],[board,points,message])
-                    undo.click(roi_undo,[points,camera],[board,points,message])
-                    clear.click(roi_clear,[points,camera],[board,points,message])
-                    save.click(roi_save,[camera,points,enabled,person,reviewed],message)
-                cam_md=gr.Markdown();live_kpi=gr.Markdown();inbox=gr.Textbox(label='오늘 기본 알림',lines=5)
-                gallery=gr.Gallery(label='오늘 스냅샷',columns=3,height=230)
-            kpi,cam_stat,chart_type,chart_sev=original.build_stats_tab()
-            kw,button,table,inbox_full=original.build_events_tab()
-            with gr.Tab('JEV 판단'):
-                with gr.Column(elem_id='jev-panel'):
-                    story=gr.HTML()
-                    decision_table=gr.Dataframe(headers=['시각','장소','본 것','어디','전송','판단','참고','사건'],
-                                                interactive=False,elem_classes=['jev-table'])
-                    gr.Markdown('맨 위 문장이 가장 최근 판단입니다. **현재 참고**만 지금 진행 중인 사건에 해당하고, '
-                                '**당시 기록**은 이미 끝난 상황입니다. 표범·판다의 곰/고양이/개는 실제 종 확인이 아닙니다.',
-                                elem_classes=['panel-box'])
-                    with gr.Accordion('원본 JSON',open=False):
-                        request_json=gr.JSON(label='보낸 내용')
-                        response_json=gr.JSON(label='받은 답 (없으면 비어 있음)')
-        outputs=[banner,live_kpi,kpi,cam_md,cam_stat,chart_type,chart_sev,table,inbox,inbox_full,gallery]
-        demo.load(original.refresh_all,kw,outputs)
-        button.click(original.refresh_all,kw,outputs);kw.change(original.refresh_all,kw,outputs)
-        gr.Timer(2).tick(original.refresh_all,kw,outputs)
-        # 영상 칸만 0.2초마다 다시 그린다. 표와 배너는 2초마다 갱신한다.
-        demo.load(engine.step_all,None,images)
-        gr.Timer(.2).tick(engine.step_all,None,images,queue=False)
-        demo.load(jev_view,None,[story,decision_table,request_json,response_json])
-        gr.Timer(2).tick(jev_view,None,[story,decision_table,request_json,response_json])
-    return demo
+def build_app(original, engine):
+    """왼쪽 메뉴와 화면별 관제 기능을 붙인다. 영상 분석은 화면 갱신과 분리되어 있다."""
+    from dashboard_ui import build_dashboard
+    return build_dashboard(original, engine)
 
 
 def parse_args():
@@ -1364,9 +1161,10 @@ def main():
     engine.start()
     print(f'SafeZoo: http://127.0.0.1:{args.port} | decision: {args.provider if args.jev else "JSON only"} / {args.jev_model}')
     try:
+        from dashboard_ui import DASHBOARD_CSS
         demo.launch(server_name='127.0.0.1',server_port=args.port,share=args.share,
                     auth=('zoo',os.environ['SAFEZOO_PASSWORD']) if args.share else None,
-                    theme=original.build_theme(),css=original.load_css()+JEV_CSS,
+                    theme=original.build_theme(),css=original.load_css()+DASHBOARD_CSS+JEV_CSS,
                     allowed_paths=[str(engine.db.root/'snapshots')],
                     blocked_paths=[str(engine.db.path)])
     finally:
