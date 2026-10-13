@@ -1,0 +1,1134 @@
+<title>ZOO-GIS Twin Control</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: status bar, scenario player, three-column body (animals | map | CCTV+events), two-part footer. Single dark look by choice: a control-room wall display. */
+:root{
+  color-scheme:dark;
+  --bg:#0a111e; --panel:#101a2d; --panel-2:#16223a; --line:#24334f; --line-2:#31436a;
+  --fg:#e7edf7; --muted:#8d9ab4; --dim:#5f6d89;
+  --accent:#4c9dff; --accent-bg:rgba(76,157,255,.14);
+  --ok:#3ecf8e; --warn:#f2b33d; --crit:#ff5f5f;
+  --ok-bg:rgba(62,207,142,.13); --warn-bg:rgba(242,179,61,.14); --crit-bg:rgba(255,95,95,.15);
+  --sans:"IBM Plex Sans KR","Malgun Gothic","Apple SD Gothic Neo",system-ui,sans-serif;
+  --mono:"IBM Plex Mono","Consolas","Menlo",monospace;
+  --r:8px;
+}
+html,body{background:var(--bg);color:var(--fg)}
+body{margin:0;font-family:var(--sans);font-size:13px;line-height:1.45;padding-inline:16px;padding-block:12px}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.app{display:flex;flex-direction:column;gap:12px;max-width:1880px;margin-inline:auto}
+
+/* top bar */
+.top{display:flex;flex-wrap:wrap;align-items:center;gap:10px 24px;padding:10px 14px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r)}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px;letter-spacing:.02em}
+.chip{font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--accent-bg);color:var(--accent);border:1px solid transparent;white-space:nowrap}
+.chip.mock{background:transparent;border-color:var(--line-2);color:var(--muted)}
+.stats{display:flex;flex-wrap:wrap;gap:6px 22px;flex:1;min-width:0}
+.stat{color:var(--muted)}
+.stat b{color:var(--fg);font-weight:600}
+.stat .ok{color:var(--ok)} .stat .warn{color:var(--warn)} .stat .crit{color:var(--crit)}
+.clock{font-size:15px;font-weight:500}
+.cover{position:relative;overflow:hidden;border:1px solid var(--crit);background:var(--crit-bg);color:var(--fg);font-weight:700;padding:8px 14px;border-radius:6px;white-space:nowrap}
+.cover i{position:absolute;inset:0;background:var(--crit);opacity:.45;transform:scaleX(0);transform-origin:left}
+.cover.holding i{transform:scaleX(1);transition:transform 2s linear}
+.cover span{position:relative}
+
+/* scenario player */
+.scn{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:8px 14px;border:1px dashed var(--line-2);border-radius:var(--r);color:var(--muted)}
+.scn label{display:flex;align-items:center;gap:6px}
+.scn select,.scn button,.btn,.search,.filter{background:var(--panel-2);border:1px solid var(--line-2);border-radius:6px;padding:5px 10px}
+.scn button.primary,.btn.primary{background:var(--accent);border-color:var(--accent);color:#06101f;font-weight:600}
+.btn.danger{background:var(--crit);border-color:var(--crit);color:#1b0606;font-weight:600}
+.btn.sm{padding:3px 8px;font-size:12px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.scn .step{margin-left:auto;color:var(--fg);min-width:0}
+
+/* emergency banner */
+.emb{display:flex;flex-wrap:wrap;gap:8px 24px;align-items:center;padding:10px 14px;border:2px solid var(--crit);background:var(--crit-bg);border-radius:var(--r)}
+.emb strong{font-size:15px}
+.emb .sp{flex:1}
+
+/* grid */
+.grid{display:grid;grid-template-columns:300px minmax(0,1fr) 350px;gap:12px;align-items:start}
+.col{display:flex;flex-direction:column;gap:12px;min-width:0}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);min-width:0}
+.panel>h2{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:4px 10px;margin:0;padding:10px 14px;font-size:14px;font-weight:600;border-bottom:1px solid var(--line)}
+.panel>h2 small{font-weight:400;font-size:11.5px;color:var(--muted)}
+.body{padding:10px;display:flex;flex-direction:column;gap:8px}
+.bottom{display:grid;grid-template-columns:minmax(0,1fr) 350px;gap:12px;align-items:start}
+body.em .map{border-color:var(--crit)}
+body.em .grid{grid-template-columns:260px minmax(0,1fr) 350px}
+
+/* animals */
+.tools{display:flex;gap:6px}
+.search{flex:1;min-width:0}
+.list{display:flex;flex-direction:column;gap:6px;max-height:330px;overflow:auto}
+.card{display:grid;grid-template-columns:1fr auto;gap:2px 8px;text-align:left;width:100%;padding:8px 10px;background:var(--panel-2);border:1px solid transparent;border-radius:6px}
+.card:hover{border-color:var(--line-2)}
+.card.sel{border-color:var(--accent);background:var(--accent-bg)}
+.card.alarm{border-color:var(--crit)}
+.card .nm{font-weight:600}
+.card .sub{color:var(--muted);font-size:12px}
+.card .r{text-align:right;font-size:12px}
+.tag{display:inline-block;font-size:10.5px;font-weight:600;padding:0 6px;border-radius:4px;border:1px solid var(--line-2);color:var(--muted);vertical-align:1px}
+.tag.d{border-color:var(--crit);color:var(--crit)} .tag.c{border-color:var(--warn);color:var(--warn)}
+.s-ok{color:var(--ok)} .s-warn{color:var(--warn)} .s-crit{color:var(--crit)} .s-dim{color:var(--dim)}
+.detail{border-top:1px solid var(--line);padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.detail h3{margin:0;font-size:13px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;font-size:12px}
+.kv dt{color:var(--muted)} .kv dd{margin:0}
+.gate{display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:4px 8px;background:var(--panel-2);border-radius:5px}
+.spark{width:100%;height:40px;display:block}
+.row{display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:5px 8px;background:var(--panel-2);border-radius:5px}
+
+/* map */
+.layers{display:flex;flex-wrap:wrap;gap:6px}
+.layers button{background:transparent;border:1px solid var(--line-2);border-radius:6px;padding:4px 10px;color:var(--muted)}
+.layers button[aria-pressed="true"]{background:var(--accent-bg);border-color:var(--accent);color:var(--fg)}
+.mapwrap{position:relative}
+#map{display:block;width:100%;height:auto;background:#0c1626;border-radius:6px}
+#map text{font-family:var(--sans)}
+.zone{cursor:pointer}
+.mk{cursor:pointer}
+.mk.sel circle.ring{stroke:var(--fg);stroke-width:3}
+.mk.alarm circle.ring{animation:pulse 1s infinite}
+@keyframes pulse{50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.mk.alarm circle.ring{animation:none}.cover.holding i{transition:none}}
+.legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:11.5px;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+.legend i.sq{border-radius:2px}
+
+/* cctv */
+.cams{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.cam{position:relative;padding:0;border:1px solid var(--line-2);border-radius:5px;overflow:hidden;background:#05080f}
+.cam.sel{border-color:var(--accent);grid-column:1/-1}
+.cam.alarm{border-color:var(--crit)}
+.cam svg{display:block;width:100%;height:auto}
+.cam img{display:block;width:100%;height:auto;aspect-ratio:16/9;object-fit:cover;background:#05080f}
+.snap{display:block;width:100%;height:auto;border-radius:6px}
+.cam .cap{position:absolute;left:6px;top:4px;font-size:11px;color:var(--fg);text-shadow:0 1px 2px #000}
+.cam .st{position:absolute;right:6px;top:4px;font-size:10.5px}
+.toggle{display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:400;color:var(--muted)}
+
+/* events */
+.feed{display:flex;flex-direction:column;gap:6px;max-height:340px;overflow:auto}
+.ev{padding:8px 10px;background:var(--panel-2);border-radius:6px;border-left:4px solid var(--accent);cursor:pointer}
+.ev.l3{border-left-color:var(--crit);background:var(--crit-bg)} .ev.l2{border-left-color:var(--warn)}
+.ev.sel{outline:1px solid var(--accent)}
+.ev.done{opacity:.6}
+.ev .hd{display:flex;flex-wrap:wrap;gap:4px 8px;font-size:11.5px;color:var(--muted)}
+.ev .ti{font-weight:600;margin-top:2px}
+.ev .ds{font-size:12px;color:var(--muted)}
+.ev .evd{font-size:11.5px;color:var(--muted);margin-top:3px}
+.ev .act{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;align-items:center}
+.check{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 8px;background:var(--panel-2);border-radius:5px;font-size:12.5px}
+.check.done{color:var(--muted)}
+
+/* timeline & radio */
+#tl{display:block;width:100%;height:auto;cursor:crosshair}
+#tl text{font-family:var(--mono);font-size:10px;fill:var(--muted)}
+.readout{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:12px;color:var(--muted);min-height:26px}
+.ch{display:flex;justify-content:space-between;align-items:center;gap:8px;width:100%;text-align:left;padding:6px 8px;background:var(--panel-2);border:1px solid transparent;border-radius:5px}
+.ch:hover{border-color:var(--line-2)}
+.log{max-height:110px;overflow:auto;font-size:11.5px;color:var(--muted);display:flex;flex-direction:column;gap:2px}
+
+/* view tabs + camera-only view */
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line)}
+.tabs button{background:transparent;border:0;border-bottom:2px solid transparent;padding:8px 16px;color:var(--muted);font-weight:600;font-size:14px}
+.tabs button[aria-selected="true"]{color:var(--fg);border-bottom-color:var(--accent)}
+.tabs .cnt{margin-left:6px;font-size:11px;font-weight:600;padding:0 6px;border-radius:999px;background:var(--crit-bg);color:var(--crit)}
+.cv-bar{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center}
+.cv-bar .sp{flex:1}
+.cv-bar .hint{color:var(--muted);font-size:12px}
+.seg{display:flex;gap:6px;flex-wrap:wrap}
+.seg button{background:transparent;border:1px solid var(--line-2);border-radius:6px;padding:4px 10px;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--accent-bg);border-color:var(--accent);color:var(--fg)}
+.cv-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.cv-grid.one{grid-template-columns:minmax(0,1fr);width:100%;max-width:max(480px,calc((100vh - 230px)*16/9));margin-inline:auto}
+.cv-grid.one.edit{max-width:max(480px,calc((100vh - 340px)*16/9))}
+.cv-grid.many{grid-template-columns:repeat(3,minmax(0,1fr))}
+.cv{display:flex;flex-direction:column;min-width:0}
+.cv .cam{border-radius:0;border-width:0 0 1px 0;width:100%}
+.cv .cam.alarm{border-width:2px;border-radius:0}
+.cv .cam .cap{font-size:13px;font-weight:600;left:10px;top:8px}
+.cv .cam .st{font-size:12px;right:10px;top:8px;background:rgba(5,8,15,.7);padding:1px 8px;border-radius:999px}
+.cv-info{padding:8px 12px;display:flex;flex-direction:column;gap:4px;font-size:12px;min-height:58px}
+.cv-info .dets{display:flex;flex-wrap:wrap;gap:4px 6px}
+.cv-info .evl{color:var(--muted)}
+@media (max-width:1180px){.cv-grid.many{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:720px){.cv-grid,.cv-grid.many{grid-template-columns:minmax(0,1fr)}}
+
+.ed-wrap{position:relative;cursor:crosshair;line-height:0}
+.ed-img{display:block;width:100%;height:auto;min-height:120px;background:#05080f}
+.ed-wrap svg{position:absolute;inset:0;width:100%;height:100%}
+.ed-pt{position:absolute;width:18px;height:18px;margin:-9px 0 0 -9px;border-radius:50%;background:var(--accent);color:#06101f;font:600 10px/18px var(--mono);text-align:center;font-style:normal;pointer-events:none}
+.ed-form{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center}
+.ed-form label{display:flex;align-items:center;gap:6px}
+.ed-form .sp{flex:1}
+
+.tbl-wrap{overflow-x:auto}
+.tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+.tbl th,.tbl td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+.tbl th{color:var(--muted);font-weight:600;font-size:11.5px;white-space:nowrap;background:var(--panel-2)}
+.tbl td.nw{white-space:nowrap}
+.tbl td.msg{min-width:220px;color:var(--muted)}
+.tbl tbody tr:hover{background:var(--panel-2)}
+.csv-sum{display:flex;flex-wrap:wrap;gap:6px 18px;color:var(--muted);font-size:12.5px}
+.csv-sum b{color:var(--fg)}
+a.btn{text-decoration:none;display:inline-block}
+a.btn[aria-disabled="true"]{opacity:.45;pointer-events:none}
+
+/* dialog */
+.ov{position:fixed;inset:0;background:rgba(3,7,14,.72);display:flex;align-items:center;justify-content:center;padding:16px;z-index:10}
+.dlg{background:var(--panel);border:1px solid var(--line-2);border-radius:10px;padding:18px;max-width:560px;width:100%;max-height:86vh;overflow:auto;display:flex;flex-direction:column;gap:12px}
+.dlg h3{margin:0;font-size:16px}
+.dlg .btns{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+.dlg ol{margin:0;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:3px;font-size:12.5px}
+
+@media (max-width:1180px){
+  .grid,body.em .grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .grid .map{grid-column:1/-1;order:-1}
+  .bottom{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:720px){
+  .grid,body.em .grid{grid-template-columns:minmax(0,1fr)}
+  .scn .step{margin-left:0;width:100%}
+}
+</style>
+
+<div class="app">
+  <header class="top">
+    <div class="brand">ZOO-GIS TWIN CONTROL <span class="chip">AI 통합 관제</span><span class="chip mock" id="modeChip">모의 데이터</span></div>
+    <div class="stats" id="stats"></div>
+    <div class="stat" id="meBox" hidden><b id="meName"></b> <button class="btn sm" id="logout">로그아웃</button></div>
+    <div class="clock num" id="clock">--:--:--</div>
+    <button class="cover" id="cover" title="2초간 길게 누르면 비상 모드 확인창이 열립니다"><i></i><span>COVER 비상 모드 (2초 누르기)</span></button>
+  </header>
+
+  <nav class="tabs" role="tablist" aria-label="화면 전환">
+    <button role="tab" data-view="dash" aria-selected="true">통합 관제</button>
+    <button role="tab" data-view="cam" aria-selected="false">카메라<span class="cnt" id="camAlarmCnt" hidden></span></button>
+    <button role="tab" data-view="csv" aria-selected="false">CSV 기록</button>
+  </nav>
+
+  <section id="csvView" hidden>
+    <div class="col">
+      <div class="cv-bar">
+        <label for="csvDay">날짜 <input type="date" id="csvDay" class="filter"></label>
+        <select id="csvCam" class="filter" aria-label="카메라 필터"><option value="">전체 카메라</option></select>
+        <select id="csvSev" class="filter" aria-label="심각도 필터"><option value="">전체 심각도</option><option>경고</option><option>주의</option><option>참고</option></select>
+        <input id="csvQ" type="search" class="search" style="max-width:260px" placeholder="객체, 유형, 메시지 검색" aria-label="사건 검색">
+        <span class="sp"></span>
+        <button class="btn" id="csvAi" disabled>AI 판단 요청</button>
+        <button class="btn" id="csvReload">새로고침</button>
+        <a class="btn primary" id="csvDl" aria-disabled="true">CSV 내려받기</a>
+      </div>
+      <div class="csv-sum" id="csvSum"></div>
+      <div class="csv-sum" id="csvAiMsg" role="status"></div>
+      <section class="panel">
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>시각</th><th>카메라</th><th>객체</th><th>유형</th><th>심각도</th><th>신뢰도</th><th>상태</th><th>확인</th><th>검토</th><th>AI 참고 판단</th><th>메시지</th><th>증거</th></tr></thead>
+            <tbody id="csvBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </section>
+
+  <section id="camView" hidden>
+    <div class="col">
+      <div class="cv-bar">
+        <div class="seg" id="cvLayout"></div>
+        <div class="seg" id="cvPick"></div>
+        <span class="sp"></span>
+        <span class="hint" id="cvHint"></span>
+      </div>
+      <div class="cv-grid" id="cvGrid"></div>
+    </div>
+  </section>
+
+  <section class="scn" id="scnBar" aria-label="모의 데이터 재생기">
+    <strong style="color:var(--fg)">모의 재생기</strong>
+    <label for="scnSel">시나리오
+      <select id="scnSel">
+        <option value="ele">코끼리 이탈 징후 (Level 3)</option>
+        <option value="hill">관람객 제한 구역 접근 (Level 2)</option>
+        <option value="cam">카메라 신호 지연 (Level 1)</option>
+      </select>
+    </label>
+    <button class="primary" id="scnPlay">시나리오 시작</button>
+    <button id="scnPause">일시정지</button>
+    <button id="scnReset">초기화</button>
+    <label for="scnSpeed">속도
+      <select id="scnSpeed"><option value="1">1배</option><option value="3">3배</option></select>
+    </label>
+    <label for="scnAuto"><input type="checkbox" id="scnAuto" checked> 관제요원 동작 자동 진행</label>
+    <span class="step" id="scnStep">대기 중. 시나리오를 시작하세요.</span>
+  </section>
+
+  <div class="emb" id="emb" hidden></div>
+
+  <main class="grid" id="dash">
+    <aside class="col">
+      <section class="panel" id="emLeft" hidden>
+        <h2>대응조 현황 <small>SB-07</small></h2>
+        <div class="body" id="teams"></div>
+        <h2 style="border-top:1px solid var(--line)">구역별 잔류 관람객</h2>
+        <div class="body" id="evac"></div>
+      </section>
+      <section class="panel">
+        <h2>실시간 동물 · 스마트락 <small id="animalCount"></small></h2>
+        <div id="mockNote" hidden style="padding:6px 14px 0;font-size:11.5px;color:var(--muted)">생체 수치, 잠금 상태, 지도 위치는 모의 데이터입니다. 영상 검출과 사건만 실제 분석 결과입니다.</div>
+        <div class="body">
+          <div class="tools">
+            <input class="search" id="q" type="search" placeholder="이름, 종, 구역 검색" aria-label="동물 검색">
+            <select class="filter" id="riskF" aria-label="위험 등급 필터">
+              <option value="">전체 등급</option><option>위험</option><option>주의</option><option>안전</option>
+            </select>
+          </div>
+          <div class="list" id="animals"></div>
+        </div>
+        <div class="detail" id="detail" hidden></div>
+      </section>
+    </aside>
+
+    <section class="panel map">
+      <h2>GIS 트윈 맵 <small>2D 도면 (3D 지형은 2단계)</small></h2>
+      <div class="body">
+        <div class="layers" id="layers"></div>
+        <div class="mapwrap"><svg id="map" viewBox="0 0 1000 600" role="img" aria-label="동물원 구역 지도"></svg></div>
+        <div class="legend">
+          <span><i style="background:var(--accent)"></i>동물 정상</span>
+          <span><i style="background:var(--crit)"></i>동물 경보</span>
+          <span><i class="sq" style="background:var(--ok)"></i>현장 인력</span>
+          <span><i class="sq" style="background:var(--warn)"></i>대응조</span>
+          <span><i class="sq" style="background:var(--crit);opacity:.5"></i>혼잡</span>
+          <span><i class="sq" style="background:var(--warn);opacity:.5"></i>보통</span>
+          <span><i class="sq" style="background:var(--fg)"></i>대피 건물 · 출입문</span>
+        </div>
+      </div>
+    </section>
+
+    <aside class="col">
+      <section class="panel" id="emRight" hidden>
+        <h2>대응 체크리스트 <small>사람이 실행, 시스템은 기록</small></h2>
+        <div class="body" id="checklist"></div>
+      </section>
+      <section class="panel">
+        <h2>AI 지능형 CCTV
+          <label class="toggle" for="popup"><input type="checkbox" id="popup" checked> 이벤트 발생 시 자동 전환</label>
+        </h2>
+        <div class="body"><div class="cams" id="cams"></div></div>
+      </section>
+      <section class="panel">
+        <h2>경보 등급별 실시간 이벤트
+          <label class="toggle" for="showDone"><input type="checkbox" id="showDone"> 종료 건 표시</label>
+        </h2>
+        <div class="body"><div class="feed" id="feed"></div></div>
+      </section>
+    </aside>
+  </main>
+
+  <section class="bottom" id="dashBottom">
+    <section class="panel">
+      <h2>타임라인 분석 <small>관람객 수(선)와 경보 발생(점), 09:00~18:00</small></h2>
+      <div class="body">
+        <svg id="tl" viewBox="0 0 900 160" role="img" aria-label="시간대별 관람객 수와 경보 발생"></svg>
+        <div class="readout" id="readout"></div>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>무전 · 인터컴 채널 <small>채널을 누르면 송신 기록</small></h2>
+      <div class="body">
+        <div id="channels" style="display:flex;flex-direction:column;gap:6px"></div>
+        <div class="log num" id="radioLog"></div>
+      </div>
+    </section>
+  </section>
+</div>
+
+<div class="ov" id="ov" hidden><div class="dlg" role="dialog" aria-modal="true" id="dlg"></div></div>
+
+<script>
+(function(){
+'use strict';
+const $ = s => document.querySelector(s);
+const pad = n => String(n).padStart(2,'0');
+const fmt = t => { t=Math.floor(t); return pad(Math.floor(t/3600))+':'+pad(Math.floor(t%3600/60))+':'+pad(t%60); };
+const hm = t => fmt(t).slice(0,5);
+const T = (h,m,s) => h*3600+m*60+(s||0);
+const setHTML = (el, html) => { if (el._h !== html) { el._h = html; el.innerHTML = html; } };
+const dist = (a,b) => Math.hypot(a.x-b.x, a.y-b.y);
+const LV = {1:['● Level 1','주의'],2:['◆ Level 2','경고'],3:['▲ Level 3','위험']};
+const esc = v => String(v==null?'':v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* ---------- live link to twin_server.py (absent → mock only) ---------- */
+const LIVE = {on:false, cams:[], events:[], alarm:new Set(), boot:'', ai:null, me:null};
+const toLogin = () => { location.href='/login'; };
+const AI_KO = {NORMAL:'평상시', AUTHORIZED_ACTIVITY:'허가된 작업', BOUNDARY_CONCERN:'구역 이탈 우려', PERSON_INTRUSION_CONCERN:'사람 침입 우려', INSUFFICIENT_EVIDENCE:'증거 부족', OTHER:'기타'};
+function aiText(ai){
+  if(!ai) return '';
+  if(ai.state==='waiting') return '판단 기다리는 중';
+  if(ai.state==='failed') return '판단 실패'+(ai.error?' ('+ai.error+')':'');
+  return (AI_KO[ai.choice]||ai.choice)+' '+Math.round(ai.probability*100)+'%'+(ai.probability<0.5?' (확신 낮음)':'')+' · 즉시 확인 필요도 '+Number(ai.needs_review).toFixed(2);
+}
+const LIVE_ANIMAL = {ZOO_CAM_ELEPHANT_01:'ele', ZOO_CAM_GIRAFFE_01:'giraffe', ZOO_CAM_TIGER_01:'tiger', ZOO_CAM_REDPANDA_01:'panda'};
+
+const TYPE_KO = {ZONE_EXIT_DANGER:'구역 이탈 관측', OUTSIDE_OBSERVED:'구역 밖 관측', PERSON_INTRUSION:'구역 안 관측'};
+/* 종 이름은 서버가 정해 보낸다 (twin_vision.py의 카메라 표). */
+const liveName = r => r.object_ko||r.object;
+function liveToEvent(r){
+  const cam=CAMS.find(c=>c.live===r.camera_id), tm=/(\d\d):(\d\d):(\d\d)/.exec(r.detected_at||'');
+  const status = r.review_label==='오탐' ? 'false' : r.acknowledged_at ? (r.active?'ack':'closed') : 'new';
+  return {id:'L:'+r.id, live:true, raw:r, t:tm?T(+tm[1],+tm[2],+tm[3]):0, level:r.severity==='경고'?2:1,
+    title:liveName(r)+' '+(TYPE_KO[r.event_type]||r.event_type), desc:r.message||'', cam:cam?cam.id:null, zone:cam?cam.zone:null,
+    animal:r.object==='person'?null:(LIVE_ANIMAL[r.camera_id]||null), status, owner:r.ack_name||'',
+    note:[r.active?'진행 중':'종료'+(r.end_reason_ko?' ('+r.end_reason_ko+')':''), r.review_label?'검토: '+r.review_label:''].filter(Boolean).join(' · '),
+    evd:[(cam?cam.id:r.camera_id)+' 영상 검출 '+Number(r.confidence).toFixed(2)+' (영상 단독 근거)'], snap:r.has_snapshot, ai:r.ai||null};
+}
+const allEvents = () => S.events.concat(LIVE.on?LIVE.events:[]);
+const liveGrid = () => CAMS.filter(c=>c.live).map(c=>c.id);
+function post(path, body){
+  return fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})})
+    .then(r=>{ if(r.status===401) toLogin(); if(!r.ok) throw new Error(r.status===403?'권한 없음':'HTTP '+r.status); return r.json(); });
+}
+function liveAction(kind, e){
+  const base='/api/events/'+e.raw.id, who={name:'관제요원'};
+  let job;
+  if(kind==='ack') job=post(base+'/ack',who);
+  if(kind==='false') job=post(base+'/review',{label:'오탐',note:'관제 화면에서 오탐 처리'}).then(()=>post(base+'/ack',who));
+  if(kind==='real') job=post(base+'/review',{label:'실제 위험',note:'관제요원 영상 확인'}).then(()=>post(base+'/ack',who))
+    .then(()=>{ log('관제요원 영상 확인: 실제 상황 확정 ('+e.title+')'); enterEmergency(e, e.title+' · 사건 정보 확인 필요', e.animal); renderAll(); });
+  if(job) job.catch(err=>{ S.step='서버 요청 실패 ('+err.message+'). 서버 실행 상태를 확인하세요.'; renderTop(); });
+}
+function connect(){
+  if(location.protocol!=='http:'&&location.protocol!=='https:') return;
+  let ws; try{ ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws'); }catch(err){ return; }
+  ws.onmessage = m => {
+    const d=JSON.parse(m.data), first=!LIVE.on;
+    LIVE.on=true; LIVE.cams=d.cameras; LIVE.boot=d.boot_error; LIVE.ai=d.ai||null; LIVE.me=d.me||null;
+    $('#meBox').hidden=!(LIVE.me&&LIVE.me.login); if(LIVE.me) $('#meName').textContent=LIVE.me.name+' ('+(LIVE.me.role==='admin'?'관리자':'관제요원')+')'; LIVE.events=d.events.map(liveToEvent);
+    LIVE.alarm=new Set(LIVE.events.filter(e=>e.raw.active&&e.status!=='false'&&e.animal).map(e=>e.animal));
+    const shift=d.now_sec-S.t;
+    S.t=d.now_sec;
+    if(first){ [S.events,S.radio,S.journal].forEach(list=>list.forEach(x=>{ x.t+=shift; })); if(S.scn) S.scn.start+=shift; if(S.em) S.em.start+=shift;
+      S.grid=liveGrid(); S.speed=1; $('#scnSpeed').value='1'; $('#scnSpeed').disabled=true; $('#mockNote').hidden=false;
+      $('#modeChip').textContent='실영상 연동 · 지도와 센서는 모의'; S.step='분석 서버 연결됨. 영상과 사건은 실제 분석 결과입니다.'; renderAll(); }
+  };
+  ws.onclose = ev => {
+    if(ev.code===4401) return toLogin();
+    if(LIVE.on){ LIVE.on=false; $('#modeChip').textContent='서버 연결 끊김 · 모의 데이터'; $('#scnSpeed').disabled=false; $('#mockNote').hidden=true; S.grid=['CAM-01','CAM-07','CAM-03','CAM-12']; renderAll(); }
+    setTimeout(connect,3000);
+  };
+}
+
+/* ---------- static mock world ---------- */
+const ZONES = [
+  {id:'forest',name:'초식동물 숲',pts:'640,60 900,60 920,230 660,250',cx:780,cy:150,base:120,cap:300,route:'780,150 600,180 500,200',alt:'780,150 700,40 500,40 500,200'},
+  {id:'safari',name:'워킹 사파리',pts:'700,300 930,300 930,470 720,480',cx:820,cy:390,base:150,cap:320,route:'820,390 940,400 960,430'},
+  {id:'farm',name:'애니멀팜',pts:'420,340 640,340 640,480 420,480',cx:530,cy:410,base:85,cap:200,route:'530,410 440,330 400,300'},
+  {id:'hill',name:'바람의 언덕 / 썰매장',pts:'120,90 400,90 400,260 120,260',cx:260,cy:175,base:240,cap:260,route:'260,175 100,200 60,230'},
+  {id:'plaza',name:'메인광장',pts:'120,340 360,340 360,500 120,500',cx:240,cy:420,base:130,cap:400,route:'240,420 90,330 60,230'},
+  {id:'kayak',name:'카약 탑승장',pts:'440,520 600,520 600,585 440,585',cx:520,cy:552,base:40,cap:120,route:'520,552 400,505 400,300'}
+];
+const ROADS = ['40,420 120,420','40,420 400,300 500,200 650,270 965,270','400,300 530,325 650,270','400,300 260,270','400,300 400,510 440,550','650,270 700,300','60,230 120,200'];
+const SHELTERS = [{n:'열대조류관 (실내)',x:500,y:200},{n:'관리동',x:60,y:230},{n:'레스토랑',x:400,y:300},{n:'사파리 대피동',x:960,y:430}];
+const DOORS = [{id:'main',n:'정문',x:40,y:420},{id:'back',n:'후문',x:965,y:270}];
+const CAMS = [
+  {id:'CAM-01',name:'초식동물 숲',zone:'forest',x:652,y:258,live:'ZOO_CAM_ELEPHANT_01'},
+  {id:'CAM-02',name:'기린 관람 구역',zone:'farm',x:642,y:336,live:'ZOO_CAM_GIRAFFE_01'},
+  {id:'CAM-07',name:'워킹 사파리 (호랑이)',zone:'safari',x:704,y:298,live:'ZOO_CAM_TIGER_01'},
+  {id:'CAM-05',name:'레서판다 관람 구역',zone:'farm',x:418,y:482,live:'ZOO_CAM_REDPANDA_01'},
+  {id:'CAM-03',name:'메인광장',zone:'plaza',x:118,y:338},
+  {id:'CAM-12',name:'카약 탑승장',zone:'kayak',x:438,y:518},
+  {id:'CAM-04',name:'바람의 언덕',zone:'hill',x:402,y:262}
+];
+const LAYERS = [['terrain','구역 지형'],['gps','IoT GPS 트래커'],['heat','관람객 Heatmap'],['evac','대피로 시각화'],['staff','현장 인력']];
+const CHECK = ['안내방송 송출','관람객 실내 대피 유도','정문 · 후문 폐쇄','마취조 차량 대기','유관기관 통보 (소방 · 경찰)','포획조 경계선 구축'];
+const visitorsAt = t => { const h=t/3600; return Math.round(350+2250*Math.exp(-Math.pow(h-14,2)/7)); };
+
+let S;
+function init(){
+  S = {
+    t:LIVE.on?S.t:T(16,57,30), playing:true, speed:+$('#scnSpeed').value||1, sel:null, grid:LIVE.on?liveGrid():['CAM-01','CAM-07','CAM-03','CAM-12'],
+    layers:{terrain:true,gps:true,heat:true,evac:false,staff:true},
+    animals:[
+      {id:'tiger',mk:'호',sp:'벵갈호랑이',nm:'한울',zone:'safari',risk:'위험',temp:38.2,tMax:39.2,hr:72,home:{x:820,y:390},w:'210 kg',keeper:'박준서',vet:'9월 22일 정기 검진'},
+      {id:'ele',mk:'코',sp:'아시아코끼리',nm:'코순이',zone:'forest',risk:'위험',temp:39.1,tMax:37.5,hr:34,home:{x:780,y:150},w:'3,400 kg',keeper:'김다은',vet:'10월 2일 발 관리',phase:'normal',wp:0},
+      {id:'bear',mk:'곰',sp:'반달가슴곰',nm:'단비',zone:'safari',risk:'위험',temp:37.5,tMax:38.8,hr:68,home:{x:770,y:440},w:'128 kg',keeper:'박준서',vet:'8월 30일 치과 처치'},
+      {id:'giraffe',mk:'기',sp:'기린',nm:'마루',zone:'farm',risk:'주의',temp:37.8,tMax:39.0,hr:60,home:{x:600,y:365},w:'980 kg',keeper:'이서윤',vet:'9월 11일 정기 검진'},
+      {id:'zebra',mk:'얼',sp:'얼룩말',nm:'줄리',zone:'forest',risk:'주의',temp:37.9,tMax:38.6,hr:42,home:{x:860,y:110},w:'320 kg',keeper:'김다은',vet:'7월 19일 예방 접종'},
+      {id:'panda',mk:'레',sp:'레서판다',nm:'라온',zone:'farm',risk:'안전',temp:null,hr:null,home:{x:470,y:445},w:'5.2 kg',keeper:'이서윤',vet:'9월 28일 체중 측정'},
+      {id:'meerkat',mk:'미',sp:'미어캣',nm:'무리 (12마리)',zone:'farm',risk:'안전',temp:null,hr:null,home:{x:455,y:375},w:'평균 0.8 kg',keeper:'이서윤',vet:'8월 5일 정기 검진'},
+      {id:'otter',mk:'수',sp:'작은발톱수달',nm:'물결',zone:'kayak',risk:'안전',temp:null,hr:null,home:{x:545,y:560},w:'3.6 kg',keeper:'정하람',vet:'9월 3일 정기 검진'}
+    ],
+    gates:{
+      forest:[{id:'G-F1',n:'내실 격리문 (동물 측)',locked:true,by:'김다은 16:02'},{id:'G-F2',n:'사육사 통로문',locked:true,by:'김다은 16:04'}],
+      safari:[{id:'G-S1',n:'내실 격리문 (동물 측)',locked:true,by:'박준서 15:40'},{id:'G-S2',n:'사육사 통로문',locked:true,by:'박준서 15:41'}],
+      farm:[{id:'G-A1',n:'방사장 출입문',locked:true,by:'이서윤 14:10'}],
+      kayak:[{id:'G-K1',n:'수조 관리문',locked:true,by:'정하람 13:25'}]
+    },
+    camState:{'CAM-04':'delay'},
+    zones:Object.fromEntries(ZONES.map(z=>[z.id,z.base])),
+    staff:[{id:'k1',n:'사육사 김다은',x:740,y:255},{id:'k2',n:'사육사 박준서',x:695,y:420},{id:'g1',n:'보안 1조',x:300,y:300},{id:'g2',n:'보안 2조',x:180,y:285}],
+    teams:[],
+    events:[], journal:[], radio:[], evSeq:0,
+    ch:[{id:'CH-1',n:'보안 관제팀',st:'on'},{id:'CH-2',n:'맹수사 사육팀',st:'idle'},{id:'CH-3',n:'의료 / 구호팀',st:'off'}],
+    em:null, scn:null, autoQ:[], hillIntrude:false, doorsClosed:false, viewT:null, step:'대기 중. 시나리오를 시작하세요.'
+  };
+  S.animals.forEach(a => a.pos = {x:a.home.x, y:a.home.y});
+  addEvent({t:S.t-1605,level:1,title:'CAM-04 연결 신호 지연',desc:'통신 네트워크 자동 복구 시도 중',cam:'CAM-04',zone:'hill',status:'ack',owner:'시스템',evd:['카메라 상태 점검']},true);
+  addEvent({t:S.t-330,level:2,title:'관람객 제한 구역 울타리 접근',desc:'바람의 언덕 2번 펜스 인근 무단 접근 감지',cam:'CAM-04',zone:'hill',status:'closed',owner:'보안 2조',evd:['CAM-04 사람 검출']},true);
+  S.radio.push({t:S.t-260,x:'CH-1 보안 2조: 2번 펜스 관람객 안내 완료'});
+  document.body.classList.remove('em');
+  $('#map')._built = false;
+  $('#scnPause').textContent = '일시정지';
+}
+function log(x){ S.journal.push({t:S.t,x}); }
+function addEvent(e, silent){
+  e.id = 'E'+(++S.evSeq); e.status = e.status||'new'; e.t = e.t==null?S.t:e.t;
+  S.events.push(e);
+  if(!silent){ log(LV[e.level][0]+' '+e.title); if($('#popup').checked){ select('event',e.id); } }
+  return e;
+}
+const A = id => S.animals.find(a=>a.id===id);
+const Z = id => ZONES.find(z=>z.id===id);
+const camOfZone = z => { const c=CAMS.find(c=>c.zone===z); return c&&c.id; };
+const camOfAnimal = a => { const live=Object.keys(LIVE_ANIMAL).find(k=>LIVE_ANIMAL[k]===a.id), c=live&&CAMS.find(c=>c.live===live); return c?c.id:camOfZone(a.zone); };
+
+/* ---------- selection shared by all panels ---------- */
+function select(type,id){
+  S.sel = {type,id};
+  const r = related();
+  if(r.cam && !S.grid.includes(r.cam)) S.grid[3] = r.cam;
+  renderAll();
+}
+function related(){
+  const s=S.sel, r={animal:null,cam:null,zone:null,event:null};
+  if(!s) return r;
+  if(s.type==='animal'){ const a=A(s.id); r.animal=a.id; r.zone=a.zone; r.cam=camOfAnimal(a); }
+  if(s.type==='cam'){ const c=CAMS.find(c=>c.id===s.id); r.cam=c.id; r.zone=c.zone; }
+  if(s.type==='zone'){ r.zone=s.id; r.cam=camOfZone(s.id); }
+  if(s.type==='event'){ const e=allEvents().find(e=>e.id===s.id); if(e){ r.event=e.id; r.animal=e.animal||null; r.cam=e.cam||null; r.zone=e.zone||null; } }
+  return r;
+}
+
+/* ---------- derived state ---------- */
+function gateState(zone){
+  const g=S.gates[zone]||[]; const open=g.filter(x=>!x.locked);
+  if(open.some(x=>x.unauth)) return ['s-crit','▲ 비인가 개방'];
+  if(open.length) return ['s-warn','◆ 개방 (작업 중)'];
+  return ['s-ok','● 잠금 완료'];
+}
+function animalAlarm(a){ return (a.id==='ele' && (a.phase==='approach'||a.phase==='escaped')) || (LIVE.on && LIVE.alarm.has(a.id)); }
+function locText(a){
+  if(LIVE.on && LIVE.alarm.has(a.id) && !(a.id==='ele'&&a.phase!=='normal')) return '영상에서 구역 밖 관측';
+  if(a.id!=='ele'||a.phase==='normal') return null;
+  return {approach:'펜스 접근',escaped:'방사장 이탈',captured:'포획 완료'}[a.phase];
+}
+function vit(a){
+  if(a.temp==null) return null;
+  const t5=Math.floor(S.t/5)*5, i=S.animals.indexOf(a);
+  const temp=a.temp+0.06*Math.sin(t5/37+i), hr=Math.round(a.hr+2*Math.sin(t5/23+i*2)+(animalAlarm(a)?9:0));
+  return {temp:temp.toFixed(1),hr,warn:temp>a.tMax};
+}
+function grade(zid){ const r=S.zones[zid]/Z(zid).cap; return r>0.85?['혼잡','crit']:r>0.4?['보통','warn']:['여유','ok']; }
+
+/* ---------- top bar ---------- */
+function renderTop(){
+  const delayed=CAMS.filter(c=>S.camState[c.id]).length, off=S.ch.filter(c=>c.st==='off').length;
+  if(LIVE.on && !S.em){
+    const up=LIVE.cams.filter(c=>c.connected&&!c.error).length, bad=LIVE.cams.filter(c=>c.error);
+    setHTML($('#stats'),
+      '<span class="stat">영상 <b class="'+(up===LIVE.cams.length?'ok':'warn')+'">'+(up===LIVE.cams.length?'● ':'◆ ')+up+'/'+LIVE.cams.length+'채널 분석 중</b></span>'+
+      (LIVE.boot||bad.length?'<span class="stat"><b class="warn">'+esc(LIVE.boot||bad[0].title+': '+bad[0].error)+'</b></span>':'')+
+      '<span class="stat">미확인 사건 <b class="num">'+LIVE.events.filter(e=>e.status==='new').length+'건</b></span>'+
+      '<span class="stat">당직 <b>사육사 12명 / 보안 8명 / 수의 2명</b> (모의)</span>');
+    $('#clock').textContent = fmt(S.t); $('#scnStep').textContent = S.step; return;
+  }
+  const sys = S.em?'<b class="crit">▲ 비상 모드</b>':(delayed||off)?'<b class="warn">◆ 일부 장애 ('+(delayed?'카메라 '+delayed:'')+(delayed&&off?', ':'')+(off?'무전 '+off:'')+')</b>':'<b class="ok">● 전 구역 정상 연동</b>';
+  setHTML($('#stats'),
+    '<span class="stat">날씨 <b>21.5°C</b> 습도 45%, 북서풍 2.1 m/s</span>'+
+    '<span class="stat">당직 <b>사육사 12명 / 보안 8명 / 수의 2명</b></span>'+
+    '<span class="stat">입장객 <b class="num">'+visitorsAt(S.t).toLocaleString()+'명</b></span>'+
+    '<span class="stat">시스템 '+sys+'</span>');
+  $('#clock').textContent = fmt(S.t);
+  $('#scnStep').textContent = S.step;
+}
+
+/* ---------- animals ---------- */
+function renderAnimals(){
+  const q=$('#q').value.trim(), rf=$('#riskF').value, r=related();
+  let list=S.animals.filter(a=>(!rf||a.risk===rf)&&(!q||(a.sp+a.nm+Z(a.zone).name).includes(q)));
+  list=list.slice().sort((a,b)=>(animalAlarm(b)?1:0)-(animalAlarm(a)?1:0));
+  $('#animalCount').textContent='총 142개체 중 '+list.length+'개체 표시';
+  setHTML($('#animals'), list.map(a=>{
+    const g=gateState(a.zone), loc=locText(a), v=vit(a);
+    return '<button class="card'+(r.animal===a.id?' sel':'')+(animalAlarm(a)?' alarm':'')+'" data-animal="'+a.id+'">'+
+      '<span class="nm">'+a.sp+' <span class="tag '+(a.risk==='위험'?'d':a.risk==='주의'?'c':'')+'">'+a.risk+'</span></span>'+
+      '<span class="r '+g[0]+'">'+g[1]+'</span>'+
+      '<span class="sub">'+a.nm+' · '+Z(a.zone).name+'</span>'+
+      '<span class="r '+(loc?(a.phase==='captured'?'s-ok':'s-crit'):'s-dim')+'">'+(loc?(loc.startsWith('영상')?loc:'위치: '+loc):'방사장 내')+'</span>'+
+      (v?'<span class="sub num" data-vt="'+a.id+'"></span><span class="r sub num" data-vh="'+a.id+'"></span>'
+        :'<span class="sub" style="grid-column:1/-1">생체 센서 없음 · 행동 지표로 관찰</span>')+
+      '</button>';
+  }).join('')||'<span class="sub" style="color:var(--muted)">조건에 맞는 개체가 없습니다. 검색어나 등급 필터를 바꿔 보세요.</span>');
+  renderDetail(r);
+}
+function sparkPath(a,k){
+  const pts=[]; const i=S.animals.indexOf(a);
+  for(let h=0;h<24;h++){ const v=Math.sin(h/3.8+i)+0.5*Math.sin(h/1.7+i*3)+(a.id==='ele'&&k===0&&h>19?(h-19)*0.5:0); pts.push(v); }
+  const mn=Math.min(...pts), mx=Math.max(...pts);
+  return pts.map((v,h)=>(h?'L':'M')+(4+h*(252/23)).toFixed(1)+' '+(34-(v-mn)/(mx-mn)*28).toFixed(1)).join('');
+}
+function renderDetail(r){
+  const el=$('#detail');
+  if(!r.animal){ el.hidden=true; return; }
+  const a=A(r.animal), v=vit(a);
+  el.hidden=false;
+  setHTML(el,
+    '<h3>'+a.sp+' '+a.nm+' 상세</h3>'+
+    '<dl class="kv"><dt>담당 사육사</dt><dd>'+a.keeper+'</dd><dt>체중</dt><dd>'+a.w+'</dd><dt>최근 진료</dt><dd>'+a.vet+'</dd><dt>위치 출처</dt><dd>'+(a.temp==null?'카메라 검출':'GPS 트래커 + 카메라 교차 확인')+'</dd></dl>'+
+    (v?'<div><div class="sub" style="color:var(--muted);font-size:11.5px">체온 24시간 추이 (정상 상한 '+a.tMax+'°C)</div><svg class="spark" viewBox="0 0 260 40" preserveAspectRatio="none"><path d="'+sparkPath(a,0)+'" fill="none" stroke="'+(v.warn?'var(--warn)':'var(--accent)')+'" stroke-width="1.5"/></svg></div>':'')+
+    '<div style="display:flex;flex-direction:column;gap:4px">'+(S.gates[a.zone]||[]).map(g=>
+      '<div class="gate"><span>'+g.id+' '+g.n+'</span><span class="'+(g.locked?'s-ok':g.unauth?'s-crit':'s-warn')+'">'+(g.locked?'잠금':'개방')+' · '+g.by+'</span></div>').join('')+'</div>');
+}
+function liveVitals(){
+  S.animals.forEach(a=>{ const v=vit(a); if(!v) return;
+    const t=document.querySelector('[data-vt="'+a.id+'"]'), h=document.querySelector('[data-vh="'+a.id+'"]');
+    if(t){ t.textContent='체온 '+v.temp+'°C '+(v.warn?'(주의)':'(정상)'); t.style.color=v.warn?'var(--warn)':''; }
+    if(h) h.textContent='심박 '+v.hr+' bpm';
+  });
+}
+
+/* ---------- map ---------- */
+function buildMap(){
+  const m=$('#map');
+  let h='<g id="mRoads">'+ROADS.map(p=>'<polyline points="'+p+'" fill="none" stroke="#1f2d47" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>').join('')+'</g>';
+  h+='<g id="mZones">'+ZONES.map(z=>'<g class="zone" data-zone="'+z.id+'"><polygon id="zp-'+z.id+'" points="'+z.pts+'" fill="#14233b" stroke="#2c4168" stroke-width="1.5"/>'+
+     '<text x="'+z.cx+'" y="'+(z.cy-28)+'" text-anchor="middle" font-size="14" font-weight="600" fill="#e7edf7">'+z.name+'</text>'+
+     '<text id="zt-'+z.id+'" x="'+z.cx+'" y="'+(z.cy-10)+'" text-anchor="middle" font-size="12" fill="#8d9ab4"></text></g>').join('')+'</g>';
+  h+='<g id="mEvac"></g><g id="mFov"></g>';
+  h+='<g id="mFix">'+SHELTERS.map(s=>'<g><rect x="'+(s.x-9)+'" y="'+(s.y-9)+'" width="18" height="18" rx="3" fill="#e7edf7"/><text x="'+s.x+'" y="'+(s.y+4)+'" text-anchor="middle" font-size="11" font-weight="700" fill="#0a111e">H</text><text x="'+s.x+'" y="'+(s.y+24)+'" text-anchor="middle" font-size="11" fill="#8d9ab4">'+s.n+'</text></g>').join('')+
+     DOORS.map(d=>'<g><rect id="door-'+d.id+'" x="'+(d.x-14)+'" y="'+(d.y-8)+'" width="28" height="16" rx="3" fill="#0c1626" stroke="#e7edf7" stroke-width="1.5"/><text id="doort-'+d.id+'" x="'+d.x+'" y="'+(d.y+24)+'" text-anchor="middle" font-size="11" fill="#8d9ab4">'+d.n+'</text></g>').join('')+
+     CAMS.map(c=>'<g class="mk" data-cam="'+c.id+'"><rect id="cm-'+c.id+'" x="'+(c.x-7)+'" y="'+(c.y-5)+'" width="14" height="10" rx="2" fill="#0c1626" stroke="#8d9ab4" stroke-width="1.5"/><title>'+c.id+' '+c.name+'</title></g>').join('')+'</g>';
+  h+='<g id="mStaff"></g><g id="mGps">'+S.animals.map(a=>'<g class="mk" id="am-'+a.id+'" data-animal="'+a.id+'"><circle class="ring" r="15" fill="#0c1626" stroke-width="2.5"/><text text-anchor="middle" y="5" font-size="13" font-weight="700" fill="#e7edf7">'+a.mk+'</text><title>'+a.sp+' '+a.nm+'</title></g>').join('')+'</g>';
+  m.innerHTML=h; m._built=true;
+}
+function renderMap(){
+  const m=$('#map'); if(!m._built) buildMap();
+  const r=related(), L=S.layers;
+  ZONES.forEach(z=>{
+    const g=grade(z.id), p=$('#zp-'+z.id);
+    p.setAttribute('fill', L.heat ? (g[1]==='crit'?'rgba(255,95,95,.28)':g[1]==='warn'?'rgba(242,179,61,.22)':'#14233b') : '#14233b');
+    p.setAttribute('stroke', r.zone===z.id?'#e7edf7':(z.id==='hill'&&S.hillIntrude?'#f2b33d':'#2c4168'));
+    p.setAttribute('stroke-width', r.zone===z.id?3:1.5);
+    p.setAttribute('stroke-dasharray', L.heat&&g[1]!=='ok'?'6 4':'');
+    $('#zt-'+z.id).textContent = L.heat ? '관람객 약 '+Math.round(S.zones[z.id])+'명 · '+g[0] : '';
+  });
+  $('#mZones').style.display = L.terrain?'':'none'; $('#mRoads').style.display = L.terrain?'':'none';
+  const esc = A('ele').phase==='escaped';
+  setHTML($('#mEvac'), L.evac ? ZONES.map(z=>{
+    const blocked = z.id==='forest' && esc;
+    return (blocked?'<polyline points="'+z.route+'" fill="none" stroke="#ff5f5f" stroke-width="3" stroke-dasharray="3 6"/><text x="600" y="168" font-size="11" fill="#ff5f5f">폐쇄 구간</text>':'')+
+      '<polyline points="'+(blocked?z.alt:z.route)+'" fill="none" stroke="#3ecf8e" stroke-width="3" stroke-dasharray="10 6" stroke-linecap="round"/>';
+  }).join('') : '');
+  const fc = r.cam && CAMS.find(c=>c.id===r.cam);
+  setHTML($('#mFov'), fc ? (()=>{ const z=Z(fc.zone), dx=z.cx-fc.x, dy=z.cy-fc.y, n=Math.hypot(dx,dy), px=-dy/n*70, py=dx/n*70;
+    return '<polygon points="'+fc.x+','+fc.y+' '+(z.cx+px)+','+(z.cy+py)+' '+(z.cx-px)+','+(z.cy-py)+'" fill="rgba(76,157,255,.16)" stroke="#4c9dff" stroke-width="1"/>'; })() : '');
+  CAMS.forEach(c=>{ const e=$('#cm-'+c.id); e.setAttribute('stroke', r.cam===c.id?'#4c9dff':S.camState[c.id]?'#f2b33d':'#8d9ab4'); e.setAttribute('fill', r.cam===c.id?'#4c9dff':'#0c1626'); });
+  DOORS.forEach(d=>{ $('#door-'+d.id).setAttribute('fill', S.doorsClosed?'#ff5f5f':'#0c1626'); $('#doort-'+d.id).textContent = d.n+(S.doorsClosed?' (폐쇄)':''); });
+  $('#mGps').style.display = L.gps?'':'none';
+  S.animals.forEach(a=>{ const e=$('#am-'+a.id), al=animalAlarm(a);
+    e.setAttribute('transform','translate('+a.pos.x.toFixed(1)+' '+a.pos.y.toFixed(1)+')');
+    e.setAttribute('class','mk'+(r.animal===a.id?' sel':'')+(al?' alarm':''));
+    e.querySelector('.ring').setAttribute('stroke', r.animal===a.id?'#e7edf7':al?'#ff5f5f':a.temp==null?'#5f6d89':'#4c9dff');
+  });
+  setHTML($('#mStaff'), (L.staff||S.em) ? S.staff.map(s=>'<g><rect x="'+(s.x-6)+'" y="'+(s.y-6)+'" width="12" height="12" rx="2" fill="#3ecf8e"/><text x="'+(s.x+10)+'" y="'+(s.y+4)+'" font-size="11" fill="#8d9ab4">'+s.n+'</text></g>').join('')+
+    S.teams.map(t=>'<g><rect x="'+(t.x-8).toFixed(1)+'" y="'+(t.y-8).toFixed(1)+'" width="16" height="16" rx="3" fill="#f2b33d"/><text x="'+(t.x+12).toFixed(1)+'" y="'+(t.y+4).toFixed(1)+'" font-size="12" font-weight="600" fill="#f2b33d">'+t.n+'</text></g>').join('') : '');
+}
+function renderLayers(){
+  setHTML($('#layers'), LAYERS.map(l=>'<button data-layer="'+l[0]+'" aria-pressed="'+!!S.layers[l[0]]+'">'+l[1]+'</button>').join(''));
+}
+
+/* ---------- CCTV ---------- */
+function detections(cid){
+  const w=Math.sin(Math.floor(S.t)/3), e=A('ele');
+  if(cid==='CAM-01'){ const ex={normal:34+w*3,approach:86,escaped:128,captured:128}[e.phase];
+    return [{l:'코끼리',c:.94,x:ex,y:38,w:36,h:30,k:e.phase==='normal'?'a':e.phase==='captured'?'ok':'crit'},{l:'얼룩말',c:.88,x:14+w*2,y:50,w:16,h:16,k:'a'}]; }
+  if(cid==='CAM-07') return [{l:'호랑이',c:.96,x:50+w*4,y:48,w:26,h:16,k:'a'},{l:'곰',c:.91,x:104,y:46,w:20,h:18,k:'a'}];
+  if(cid==='CAM-03') return [{l:'사람',c:.9,x:30+w*5,y:52,w:8,h:20,k:'p'},{l:'사람',c:.87,x:70-w*4,y:50,w:8,h:22,k:'p'},{l:'사람',c:.92,x:112+w*3,y:54,w:8,h:19,k:'p'}];
+  if(cid==='CAM-12') return [{l:'사람',c:.89,x:44+w*3,y:54,w:8,h:20,k:'p'},{l:'사람',c:.85,x:96,y:52,w:8,h:21,k:'p'}];
+  return [{l:'사람',c:.9,x:40+w*4,y:52,w:8,h:20,k:'p'},{l:'사람',c:.93,x:S.hillIntrude?126:92,y:50,w:8,h:22,k:S.hillIntrude?'warn':'p'}];
+}
+let VIEW = 'dash';
+const CV = {layout:'grid', cam:null, edit:null};
+
+function camTile(cid, selected, action){
+  const c=CAMS.find(c=>c.id===cid), col={a:'#4c9dff',p:'#8d9ab4',crit:'#ff5f5f',warn:'#f2b33d',ok:'#3ecf8e'};
+  if(c.live&&LIVE.on) return '<button class="cam'+(selected?' sel':'')+'" '+action+'="'+cid+'" aria-label="'+cid+' '+c.name+' 실영상">'+
+    '<img src="/stream/'+c.live+'.mjpg" alt="'+cid+' '+c.name+' 실영상"><span class="cap">'+cid+' '+c.name+'</span><span class="st" data-ls="'+c.live+'"></span></button>';
+  const d=detections(cid), st=S.camState[cid];
+  const alarm=d.some(x=>x.k==='crit'||x.k==='warn');
+  return '<button class="cam'+(selected?' sel':'')+(alarm?' alarm':'')+'" '+action+'="'+cid+'" aria-label="'+cid+' '+c.name+'">'+
+    '<svg viewBox="0 0 160 90"><rect width="160" height="90" fill="#070c16"/><rect y="62" width="160" height="28" fill="#0d1626"/>'+
+    '<line x1="120" y1="20" x2="120" y2="84" stroke="#31436a" stroke-width="2" stroke-dasharray="2 3"/>'+
+    d.map(x=>'<rect x="'+x.x.toFixed(1)+'" y="'+x.y+'" width="'+x.w+'" height="'+x.h+'" fill="'+col[x.k]+'" fill-opacity=".18" stroke="'+col[x.k]+'" stroke-width="1"/>'+
+      '<text x="'+x.x.toFixed(1)+'" y="'+(x.y-2)+'" font-size="6" fill="'+col[x.k]+'" font-family="monospace">'+x.l+' '+x.c.toFixed(2)+'</text>').join('')+
+    (st?'<rect width="160" height="90" fill="#070c16" fill-opacity=".6"/><text x="80" y="48" text-anchor="middle" font-size="8" fill="#f2b33d">신호 지연 2.4초 · 마지막 프레임</text>':'')+
+    '</svg><span class="cap">'+cid+' '+c.name+(LIVE.on?' (모의)':'')+'</span><span class="st '+(st?'s-warn':alarm?'s-crit':'s-ok')+'">'+(st?'◆ 지연':alarm?'▲ 검출':'● 실시간')+'</span></button>';
+}
+function renderCams(){
+  /* 한 번에 한 화면만 영상을 연다. 두 화면이 동시에 스트림을 잡으면 브라우저 연결 한도를 넘는다. */
+  if(VIEW!=='dash') return setHTML($('#cams'),'');
+  const r=related();
+  setHTML($('#cams'), S.grid.map(cid=>camTile(cid, r.cam===cid, 'data-cam')).join(''));
+}
+
+/* ---------- camera-only view ---------- */
+const cvCams = () => LIVE.on ? liveGrid() : CAMS.map(c=>c.id);
+function camAlarm(cid){
+  const c=CAMS.find(c=>c.id===cid);
+  if(c.live&&LIVE.on){ const l=LIVE.cams.find(x=>x.id===c.live); return !!(l&&l.detections.some(d=>d.danger)); }
+  return detections(cid).some(x=>x.k==='crit'||x.k==='warn');
+}
+function camInfo(cid){
+  const c=CAMS.find(c=>c.id===cid);
+  let dets;
+  if(c.live&&LIVE.on){
+    const l=LIVE.cams.find(x=>x.id===c.live), by={};
+    (l?l.detections:[]).forEach(d=>{ const k=d.label||d.name, o=by[k]||(by[k]={n:0,max:0,danger:false}); o.n++; o.max=Math.max(o.max,d.confidence); o.danger=o.danger||d.danger; });
+    dets=Object.keys(by).map(k=>'<span class="tag'+(by[k].danger?' d':'')+'">'+esc(k)+' '+by[k].n+' · 최고 '+by[k].max.toFixed(2)+'</span>');
+    if(l&&l.ignored) dets.push('<span class="s-dim">정지 물체 '+l.ignored+'개 제외 (회색 박스)</span>');
+  } else {
+    const by={};
+    detections(cid).forEach(d=>{ const o=by[d.l]||(by[d.l]={n:0,max:0,danger:false}); o.n++; o.max=Math.max(o.max,d.c); o.danger=o.danger||d.k==='crit'||d.k==='warn'; });
+    dets=Object.keys(by).map(k=>'<span class="tag'+(by[k].danger?' d':'')+'">'+k+' '+by[k].n+' · 최고 '+by[k].max.toFixed(2)+'</span>');
+  }
+  const evs=allEvents().filter(e=>e.cam===cid).sort((a,b)=>b.t-a.t).slice(0,2);
+  return '<div class="dets">'+(dets.length?dets.join(''):'<span class="s-dim">검출된 객체 없음</span>')+'</div>'+
+    (evs.length?evs.map(e=>'<div class="evl"><span class="num">'+fmt(e.t)+'</span> '+LV[e.level][0]+' '+esc(e.title)+' · '+ST[e.status]+'</div>').join('')
+      :'<div class="evl">이 카메라의 오늘 사건 없음</div>');
+}
+function renderCamView(){
+  const on=VIEW==='cam', dash=VIEW==='dash';
+  $('#camView').hidden=!on; $('#csvView').hidden=VIEW!=='csv'; $('#dash').hidden=!dash; $('#dashBottom').hidden=!dash; $('#scnBar').hidden=!dash;
+  document.querySelectorAll('[data-view]').forEach(b=>b.setAttribute('aria-selected', String(b.dataset.view===VIEW)));
+  const ids=cvCams(), alarms=ids.filter(camAlarm).length, cnt=$('#camAlarmCnt');
+  cnt.hidden=!alarms; cnt.textContent=alarms;
+  if(!on) return setHTML($('#cvGrid'),'');
+  if(!ids.includes(CV.cam)) CV.cam=ids[0];
+  const one=CV.layout==='one';
+  if(CV.edit && (!LIVE.on || CV.edit.id!==CV.cam || !one)) CV.edit=null;
+  const canEdit = LIVE.on && !!CAMS.find(c=>c.id===CV.cam).live && (!LIVE.me || LIVE.me.role==='admin');
+  setHTML($('#cvLayout'), '<button data-cvlayout="grid" aria-pressed="'+!one+'">전체 보기</button><button data-cvlayout="one" aria-pressed="'+one+'">1분할</button>'+
+    (canEdit?'<button data-cvedit="1" aria-pressed="'+!!CV.edit+'">구역 편집</button>':''));
+  setHTML($('#cvPick'), one ? ids.map(id=>'<button data-cvpick="'+id+'" aria-pressed="'+(id===CV.cam)+'">'+id+(camAlarm(id)?' ▲':'')+'</button>').join('') : '');
+  $('#cvHint').textContent = (LIVE.on?'실영상 '+ids.length+'채널':'모의 화면 '+ids.length+'채널')+' · '+(one?'영상을 누르면 전체 보기로 돌아갑니다':'영상을 누르면 그 카메라만 크게 봅니다');
+  const show=one?[CV.cam]:ids, grid=$('#cvGrid');
+  grid.className='cv-grid'+(one?' one':show.length>4?' many':'')+(CV.edit?' edit':'');
+  if(CV.edit){
+    $('#cvHint').textContent='영상 위를 눌러 구역의 꼭짓점을 찍습니다';
+    const html=editorHTML(CV.edit);
+    if(grid._h!==html){ grid._h=html; grid.innerHTML=html; $('#edOn').checked=CV.edit.enabled; $('#edPerson').checked=CV.edit.person; drawEdit(); }
+    return;
+  }
+  const html=show.map(id=>'<article class="panel cv">'+camTile(id,false,'data-cvcam')+'<div class="cv-info" data-cvinfo="'+id+'"></div></article>').join('');
+  if(grid._h!==html){ grid._h=html; grid.innerHTML=html; }
+  show.forEach(id=>{ const el=grid.querySelector('[data-cvinfo="'+id+'"]'); if(el) setHTML(el, camInfo(id)); });
+}
+/* ---------- safe-zone editor (camera tab, 1분할) ---------- */
+function editorHTML(ed){
+  const c=CAMS.find(c=>c.id===ed.id);
+  return '<article class="panel cv"><div class="ed-wrap" id="edWrap"><img class="ed-img" id="edImg" alt="'+ed.id+' '+c.name+' 현재 화면">'+
+    '<svg id="edSvg" viewBox="0 0 1000 1000" preserveAspectRatio="none"></svg><div id="edPts"></div></div>'+
+    '<div class="cv-info"><div><b>'+ed.id+' '+c.name+' 안전구역 편집</b></div>'+
+    '<div class="evl">동물이 있어야 할 구역의 가장자리를 순서대로 눌러 주세요. 감시를 켜면 동물이 이 구역 밖에서 관측될 때 사건이 기록됩니다.</div>'+
+    '<div class="ed-form"><label for="edOn"><input type="checkbox" id="edOn"> 구역 감시 켜기</label>'+
+    '<label for="edPerson"><input type="checkbox" id="edPerson"> 사람이 구역 안에서 관측되면 경고</label><span class="sp"></span>'+
+    '<button class="btn sm" data-ed="undo">마지막 점 취소</button><button class="btn sm" data-ed="clear">전부 지우기</button>'+
+    '<button class="btn sm" data-ed="cancel">취소</button><button class="btn sm primary" data-ed="save">저장</button></div>'+
+    '<div class="evl" id="edMsg" role="status"></div></div></article>';
+}
+function drawEdit(){
+  const ed=CV.edit, svg=$('#edSvg'); if(!ed||!svg) return;
+  const pts=ed.pts.map(p=>(p[0]*1000).toFixed(1)+','+(p[1]*1000).toFixed(1)).join(' ');
+  svg.innerHTML = ed.pts.length>=3 ? '<polygon points="'+pts+'" fill="rgba(76,157,255,.2)" stroke="#4c9dff" stroke-width="2" vector-effect="non-scaling-stroke"/>'
+    : ed.pts.length===2 ? '<polyline points="'+pts+'" fill="none" stroke="#4c9dff" stroke-width="2" vector-effect="non-scaling-stroke"/>' : '';
+  $('#edPts').innerHTML = ed.pts.map((p,i)=>'<i class="ed-pt" style="left:'+(p[0]*100).toFixed(2)+'%;top:'+(p[1]*100).toFixed(2)+'%">'+(i+1)+'</i>').join('');
+  $('#edMsg').textContent = ed.msg || (ed.pts.length<3 ? '꼭짓점 '+ed.pts.length+'개. 3개 이상 찍어야 저장할 수 있습니다.' : '꼭짓점 '+ed.pts.length+'개.');
+}
+function openEdit(){
+  const c=CAMS.find(c=>c.id===CV.cam); if(!c||!c.live) return;
+  /* 실시간 영상을 먼저 끊어야 브라우저가 정지 화면 요청을 보낼 자리가 생긴다. */
+  CV.layout='one';
+  CV.edit={id:c.id, live:c.live, pts:[], enabled:true, person:false, frameUrl:'', msg:'화면을 불러오는 중'};
+  renderAll();
+  setTimeout(()=>loadEdit(c), 200);
+}
+function loadEdit(c){
+  if(!CV.edit||CV.edit.live!==c.live) return;
+  fetch('/api/cameras/'+c.live+'/frame.jpg').then(r=>{
+    if(!r.ok) throw new Error(r.status===503?'영상이 아직 준비되지 않았습니다.':'HTTP '+r.status);
+    return r.blob();
+  }).then(blob=>{
+    if(!CV.edit||CV.edit.live!==c.live) return;
+    if(CV.edit.frameUrl) URL.revokeObjectURL(CV.edit.frameUrl);
+    CV.edit.frameUrl=URL.createObjectURL(blob);
+    const img=$('#edImg'); if(img) img.src=CV.edit.frameUrl;
+  }).catch(err=>{
+    if(!CV.edit) return;
+    CV.edit.msg='화면을 불러오지 못했습니다. '+err.message;
+    drawEdit();
+  });
+  fetch('/api/cameras/'+c.live+'/roi').then(r=>r.json().then(d=>({ok:r.ok,d}))).then(res=>{
+    if(!CV.edit||CV.edit.live!==c.live) return;
+    if(!res.ok){ CV.edit.msg='구역 정보를 불러오지 못했습니다: '+(res.d.detail||'서버 오류'); return drawEdit(); }
+    CV.edit.pts=res.d.polygon||[];
+    CV.edit.enabled=res.d.enabled||!(res.d.polygon||[]).length;
+    CV.edit.person=!!res.d.person_inside;
+    CV.edit.msg='';
+    const on=$('#edOn'), person=$('#edPerson');
+    if(on) on.checked=CV.edit.enabled;
+    if(person) person.checked=CV.edit.person;
+    drawEdit();
+  }).catch(()=>{
+    if(!CV.edit) return;
+    CV.edit.msg='구역 정보를 불러오지 못했습니다. 서버 실행 상태를 확인하세요.';
+    drawEdit();
+  });
+}
+function edAction(kind){
+  const ed=CV.edit; if(!ed) return;
+  ed.msg='';
+  if(kind==='undo') ed.pts.pop();
+  if(kind==='clear') ed.pts=[];
+  if(kind==='cancel'){ if(ed.frameUrl) URL.revokeObjectURL(ed.frameUrl); CV.edit=null; return renderAll(); }
+  if(kind==='save'){
+    if(ed.pts.length<3){ ed.msg='꼭짓점을 3개 이상 찍은 뒤 저장하세요.'; return drawEdit(); }
+    return fetch('/api/cameras/'+ed.live+'/roi',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({polygon:ed.pts, enabled:$('#edOn').checked, person_inside:$('#edPerson').checked})})
+      .then(r=>r.json().then(d=>({ok:r.ok,d})))
+      .then(res=>{
+        if(!res.ok){ ed.msg='저장하지 못했습니다: '+(res.d.detail||'서버 오류'); return drawEdit(); }
+        log(ed.id+' 안전구역 저장, 구역 감시 '+(res.d.enabled?'켜짐':'꺼짐'));
+        S.step=ed.id+' 안전구역을 저장했습니다. 구역 감시 '+(res.d.enabled?'켜짐':'꺼짐')+'.';
+        CV.edit=null; renderAll();
+      }).catch(()=>{ ed.msg='저장하지 못했습니다. 서버 실행 상태를 확인하세요.'; drawEdit(); });
+  }
+  drawEdit();
+}
+
+/* ---------- one-day event record (CSV tab) ---------- */
+const today = () => { const d=new Date(); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); };
+const CSVV = {day:today(), rows:[], state:'idle', tick:0};
+function loadCsv(){
+  if(!LIVE.on){ CSVV.state='offline'; return renderCsv(); }
+  const day=CSVV.day;
+  fetch('/api/events?day='+encodeURIComponent(day)).then(r=>r.json().then(d=>({ok:r.ok,d}))).then(res=>{
+    if(day!==CSVV.day) return;
+    if(!res.ok){ CSVV.state='error'; CSVV.err=res.d.detail||'서버 오류'; CSVV.rows=[]; }
+    else { CSVV.state='ok'; CSVV.rows=res.d.events.map(liveToEvent); }
+    renderCsv();
+  }).catch(()=>{ CSVV.state='error'; CSVV.err='서버에 연결하지 못했습니다'; CSVV.rows=[]; renderCsv(); });
+}
+function renderCsv(){
+  if(VIEW!=='csv') return;
+  const cam=$('#csvCam').value, sev=$('#csvSev').value, q=$('#csvQ').value.trim().toLowerCase(), dl=$('#csvDl');
+  if(LIVE.on){ dl.setAttribute('href','/api/events.csv?day='+encodeURIComponent(CSVV.day)); dl.setAttribute('aria-disabled','false'); }
+  else { dl.removeAttribute('href'); dl.setAttribute('aria-disabled','true'); }
+  const all=CSVV.rows, rows=all.filter(e=>(!cam||e.raw.camera_id===cam)&&(!sev||e.raw.severity===sev)&&
+    (!q||[e.title,e.desc,e.raw.object,e.raw.event_type,e.cam||''].join(' ').toLowerCase().includes(q))).sort((a,b)=>b.t-a.t);
+  const n=k=>all.filter(e=>e.raw.severity===k).length;
+  const answered=all.filter(e=>e.ai&&e.ai.state==='answered').length, todo=all.filter(e=>!e.raw.acknowledged_at&&!(e.ai&&e.ai.state==='answered')).length;
+  const job=LIVE.on&&LIVE.ai?LIVE.ai.job:null, busy=!!(job&&job.running), btn=$('#csvAi');
+  btn.disabled=!LIVE.on||busy||CSVV.state!=='ok'||!todo;
+  btn.textContent=busy?'AI 판단 중 '+job.done+'/'+job.total:'AI 판단 요청'+(todo?' (미확인 '+todo+'건)':'');
+  setHTML($('#csvAiMsg'), !LIVE.on||!LIVE.ai ? ''
+    : '<span>AI 판단 <b class="num">'+answered+'건</b> · 모델 '+esc(LIVE.ai.model)+' · 실시간 판단 '+(LIVE.ai.live?'켜짐':'꺼짐 (서버를 --ollama로 실행하면 켜짐)')+'</span>'+
+      (busy?'<span>'+esc(job.day)+' 일괄 판단 진행 중 <b class="num">'+job.done+'/'+job.total+'</b>'+(job.errors?' · 실패 '+job.errors:'')+'</span>'
+        :job&&job.finished_at&&job.total?'<span>마지막 일괄 판단: '+esc(job.day)+' '+job.total+'건 중 '+(job.done-job.errors)+'건 완료'+(job.errors?', 실패 '+job.errors:'')+(job.last_error?' · <span class="s-warn">'+esc(job.last_error)+'</span>':'')+'</span>':'')+
+      (CSVV.aiErr?'<span class="s-warn">'+esc(CSVV.aiErr)+'</span>':'')+
+      '<span>AI 판단은 참고용이며 사건의 확인 상태를 바꾸지 않습니다.</span>');
+  if(job && CSVV.jobDone!==job.done+':'+job.running){ const first=CSVV.jobDone===undefined; CSVV.jobDone=job.done+':'+job.running; if(!first && job.day===CSVV.day) loadCsv(); }
+  setHTML($('#csvSum'),
+    CSVV.state==='offline' ? '<span>분석 서버에 연결되어 있지 않아 기록을 불러올 수 없습니다. 서버를 실행한 뒤 다시 여세요.</span>'
+    : CSVV.state==='error' ? '<span class="s-crit">기록을 불러오지 못했습니다: '+esc(CSVV.err)+'</span>'
+    : CSVV.state!=='ok' ? '<span>불러오는 중</span>'
+    : '<span><b class="num">'+esc(CSVV.day)+'</b> 사건 <b class="num">'+all.length+'건</b></span><span>경고 <b class="num">'+n('경고')+'</b></span><span>주의 <b class="num">'+n('주의')+'</b></span><span>참고 <b class="num">'+n('참고')+'</b></span>'+
+      '<span>미확인 <b class="num">'+all.filter(e=>!e.raw.acknowledged_at).length+'</b></span><span>진행 중 <b class="num">'+all.filter(e=>e.raw.active).length+'</b></span>'+
+      (rows.length!==all.length?'<span>필터 결과 <b class="num">'+rows.length+'건</b> 표시 (내려받는 파일에는 하루 전체가 들어갑니다)</span>':''));
+  setHTML($('#csvBody'), rows.length ? rows.map(e=>{ const r=e.raw;
+    return '<tr><td class="nw num">'+esc((r.detected_at||'').slice(11))+'</td><td class="nw">'+esc(e.cam||r.camera_id)+'</td><td class="nw">'+esc(liveName(r))+'</td>'+
+      '<td class="nw">'+esc(TYPE_KO[r.event_type]||r.event_type)+'</td><td class="nw '+(r.severity==='경고'?'s-warn':'')+'">'+esc(r.severity)+'</td><td class="nw num">'+Number(r.confidence).toFixed(2)+'</td>'+
+      '<td class="nw">'+(r.active?'<span class="s-crit">진행 중</span>':'종료'+(r.end_reason_ko?' ('+esc(r.end_reason_ko)+')':''))+'</td>'+
+      '<td class="nw">'+(r.acknowledged_at?esc(r.acknowledged_at.slice(11,19))+' '+esc(r.ack_name||''):'<span class="s-warn">미확인</span>')+'</td>'+
+      '<td class="nw">'+esc(r.review_label||'')+'</td><td class="nw'+(e.ai&&e.ai.state==='failed'?' s-warn':'')+'">'+esc(aiText(e.ai))+'</td><td class="msg">'+esc(r.message||'')+'</td>'+
+      '<td class="nw">'+(r.has_snapshot?'<button class="btn sm" data-snap="'+esc(r.id)+'">사진</button>':'')+'</td></tr>'; }).join('')
+    : '<tr><td colspan="12" style="color:var(--muted)">'+(CSVV.state==='ok'?(all.length?'필터 조건에 맞는 사건이 없습니다.':'이 날짜에 기록된 사건이 없습니다.'):'표시할 기록이 없습니다.')+'</td></tr>');
+}
+function setView(v){
+  VIEW = v==='cam'||v==='csv' ? v : 'dash';
+  try{ history.replaceState(null,'',VIEW==='cam'?'#cameras':VIEW==='csv'?'#csv':'#'); }catch(err){}
+  renderAll();
+  if(VIEW==='csv'){ $('#csvDay').value=CSVV.day; loadCsv(); }
+}
+
+function liveCamStatus(){
+  document.querySelectorAll('[data-ls]').forEach(el=>{
+    const c=LIVE.cams.find(x=>x.id===el.dataset.ls); if(!c) return;
+    const danger=c.detections.some(d=>d.danger);
+    el.textContent = c.error ? '◆ '+c.error : danger ? '▲ 위험 관측' : (c.armed?'● 구역 감시 중':'○ 구역 감시 꺼짐')+' · '+c.fps+' fps';
+    el.className = 'st '+(c.error?'s-warn':danger?'s-crit':c.armed?'s-ok':'s-dim');
+    el.closest('.cam').classList.toggle('alarm', danger);
+  });
+}
+
+/* ---------- events ---------- */
+const ST = {new:'신규',ack:'확인됨',active:'대응 중',closed:'종료',false:'오탐'};
+function renderFeed(){
+  const r=related(), showDone=$('#showDone').checked;
+  const list=allEvents().filter(e=>showDone||!(e.status==='closed'||e.status==='false'||e.grouped))
+    .sort((a,b)=>(b.level===3&&b.status!=='closed'&&b.status!=='false'?1:0)-(a.level===3&&a.status!=='closed'&&a.status!=='false'?1:0)||b.t-a.t);
+  setHTML($('#feed'), list.map(e=>{
+    const done=e.status==='closed'||e.status==='false';
+    let act='';
+    if(e.live){
+      if(e.status==='new') act='<button class="btn sm primary" data-ev="ack" data-id="'+e.id+'">확인</button><button class="btn sm" data-ev="false" data-id="'+e.id+'">오탐 처리</button>'+
+        (e.raw.active&&e.raw.object!=='person'&&!S.em?'<button class="btn sm danger" data-ev="real" data-id="'+e.id+'">실제 상황 · 비상 모드</button>':'');
+      if(e.snap) act+='<button class="btn sm" data-snap="'+e.raw.id+'">증거 사진</button>';
+    }
+    else if(e.level===3&&e.status==='new') act='<button class="btn sm danger" data-ev="real" data-id="'+e.id+'">실제 상황 · 비상 모드</button><button class="btn sm" data-ev="false" data-id="'+e.id+'">오탐 처리</button><span class="num s-crit" data-cd="'+e.id+'"></span>';
+    else if(e.status==='new') act='<button class="btn sm primary" data-ev="ack" data-id="'+e.id+'">확인</button><button class="btn sm" data-ev="false" data-id="'+e.id+'">오탐 처리</button>';
+    else if(e.status==='ack'&&e.level<3) act='<button class="btn sm" data-ev="close" data-id="'+e.id+'">종료</button>';
+    return '<div class="ev l'+e.level+(r.event===e.id?' sel':'')+(done?' done':'')+'" data-event="'+e.id+'" tabindex="0">'+
+      '<div class="hd"><span class="num">'+fmt(e.t)+'</span><span>'+LV[e.level][0]+' ('+LV[e.level][1]+')</span>'+(LIVE.on?'<span class="tag">'+(e.live?'실영상':'모의')+'</span>':'')+'<span>'+ST[e.status]+(e.owner?' · '+esc(e.owner):'')+(e.note?' · '+esc(e.note):'')+'</span></div>'+
+      '<div class="ti">'+esc(e.title)+'</div><div class="ds">'+esc(e.desc)+'</div>'+
+      (e.evd?'<div class="evd">감지 근거 '+e.evd.length+'건: '+esc(e.evd.join(', '))+'</div>':'')+
+      (e.ai?'<div class="evd">AI 참고 판단 ('+esc(e.ai.model||'')+'): '+esc(aiText(e.ai))+'</div>':'')+
+      (act?'<div class="act">'+act+'</div>':'')+'</div>';
+  }).join('')||'<span style="color:var(--muted)">진행 중인 경보가 없습니다.</span>');
+  liveCountdown();
+}
+function liveCountdown(){
+  document.querySelectorAll('[data-cd]').forEach(el=>{ const e=allEvents().find(x=>x.id===el.dataset.cd); if(!e) return;
+    const left=30-(S.t-e.t); el.textContent = left>0 ? '상위 전파까지 '+Math.ceil(left)+'초' : '미확인 30초 경과 · 상위 전파됨'; });
+}
+function evAction(kind,id){
+  const e=allEvents().find(x=>x.id===id); if(!e) return;
+  if(e.live) return liveAction(kind,e);
+  if(kind==='ack'){ e.status='ack'; e.owner=e.zone==='hill'?'보안 2조':'관제요원'; log(e.title+' 확인, 담당 '+e.owner); }
+  if(kind==='close'){ e.status='closed'; if(e.zone==='hill') S.hillIntrude=false; log(e.title+' 종료'); }
+  if(kind==='false'){ e.status='false'; e.note='사유: 현장 확인 결과 이상 없음'; if(e.animal==='ele'){ A('ele').phase='normal'; } if(e.zone==='hill') S.hillIntrude=false; S.autoQ=[]; log(e.title+' 오탐 처리, 사유 기록'); S.step='오탐 처리로 종료. 사유는 재학습 데이터로 저장됩니다.'; }
+  if(kind==='real'){ confirmReal(e); }
+  renderAll();
+}
+
+/* ---------- emergency mode (SB-07, simplified) ---------- */
+function confirmReal(e){
+  e.status='active'; e.owner='관제요원'; log('관제요원 영상 확인: 실제 상황 확정');
+  enterEmergency(e, '아시아코끼리 1마리 · 위험 등급', 'ele');
+  A('ele').phase='escaped'; A('ele').wp=0;
+}
+function enterEmergency(e, summary, animal){
+  S.em={start:S.t,ev:e?e.id:null,summary,animal:animal||'ele',done:CHECK.map(()=>null),captured:false};
+  S.layers.evac=true; document.body.classList.add('em');
+  S.teams=[{n:'추적조',x:500,y:200,v:13},{n:'마취조 차량',x:60,y:230,v:16},{n:'포획조',x:400,y:300,v:11}];
+  S.ch[1].st='on'; radio('관제 → 전 채널: 대응조 전체 호출'); log('비상 모드 진입, 대응조 호출');
+  S.step='비상 모드. 체크리스트를 순서대로 실행하세요.';
+  if($('#scnAuto').checked){ CHECK.forEach((c,i)=>auto(4*(i+1),()=>doCheck(i))); auto(4*CHECK.length+8,capture); auto(4*CHECK.length+14,release); }
+}
+function doCheck(i){
+  if(!S.em||S.em.done[i]!=null) return;
+  S.em.done[i]=S.t; log('체크리스트: '+CHECK[i]+' 완료');
+  if(i===2) S.doorsClosed=true;
+  if(i===0) radio('관제 → 원내 방송: 실내 대피 안내 송출');
+  if(i===4) radio('관제 → 외부: 소방, 경찰 통보 기록');
+}
+function capture(){ if(!S.em||S.em.captured) return; S.em.captured=true; if(A('ele').phase==='escaped') A('ele').phase='captured'; log('마취조 보고: 포획 완료'); radio('CH-2 마취조: 포획 완료, 개체 안정'); S.step='포획 완료. 동물원장 승인 후 비상 해제.'; }
+function release(){
+  if(!S.em) return;
+  const e=S.events.find(x=>x.id===S.em.ev); if(e) e.status='closed';
+  S.events.filter(x=>x.grouped).forEach(x=>x.status='closed');
+  log('동물원장 승인, 비상 해제');
+  const el=A('ele'); el.phase='normal'; el.pos={x:el.home.x,y:el.home.y};
+  (S.gates.forest||[]).forEach(g=>{ g.locked=true; g.unauth=false; g.by='김다은 '+hm(S.t); });
+  S.em=null; S.teams=[]; S.doorsClosed=false; S.layers.evac=false; S.ch[1].st='idle';
+  ZONES.forEach(z=>S.zones[z.id]=z.base); document.body.classList.remove('em');
+  S.step='시나리오 종료. 사후 보고서 초안이 생성되었습니다.'; S.scn=null;
+  showReport();
+}
+function renderEm(){
+  const on=!!S.em; $('#emb').hidden=!on; $('#emLeft').hidden=!on; $('#emRight').hidden=!on;
+  if(!on) return;
+  const e=A(S.em.animal), allDone=S.em.done.every(d=>d!=null);
+  setHTML($('#emb'), '<strong>▲ 비상 모드</strong><span>'+esc(S.em.summary)+'</span><span>마지막 위치: <b>'+(e.phase==='normal'?'확인 중':nearest(e.pos))+'</b></span><span>경과 <b class="num" id="emEl"></b></span><span class="sp"></span>'+
+    '<button class="btn sm" data-em="capture" '+(allDone&&!S.em.captured?'':'disabled')+'>포획 완료 확인</button>'+
+    '<button class="btn sm danger" data-em="release" '+(S.em.captured||!S.em.ev?'':'disabled')+'>비상 해제 (동물원장 승인)</button>');
+  $('#emEl').textContent=fmt(S.t-S.em.start).slice(3);
+  setHTML($('#checklist'), CHECK.map((c,i)=>{ const d=S.em.done[i];
+    return '<div class="check'+(d!=null?' done':'')+'"><span>'+(d!=null?'☑ ':'☐ ')+c+'</span>'+(d!=null?'<span class="num">'+fmt(d)+'</span>':'<button class="btn sm primary" data-check="'+i+'">실행</button>')+'</div>'; }).join(''));
+  setHTML($('#teams'), S.teams.map(t=>{ const d=Math.round(dist(t,e.pos)*1.2); return '<div class="row"><span>'+t.n+'</span><span class="'+(d<40?'s-ok':'s-warn')+'">'+(d<40?'● 현장 도착':'이동 중 · 약 '+d+' m')+'</span></div>'; }).join(''));
+  setHTML($('#evac'), ZONES.map(z=>{ const n=Math.round(S.zones[z.id]); return '<div class="row"><span>'+z.name+'</span><span class="num '+(n<5?'s-ok':'')+'">'+(n<5?'● 대피 완료':n+'명')+'</span></div>'; }).join(''));
+}
+function nearest(p){ let b=ZONES[0]; ZONES.forEach(z=>{ if(dist({x:z.cx,y:z.cy},p)<dist({x:b.cx,y:b.cy},p)) b=z; }); return b.name+' 인근'; }
+
+/* ---------- timeline ---------- */
+function renderTimeline(){
+  const X=t=>44+(t-T(9,0))/(9*3600)*836, Y=v=>118-v/3000*96, now=Math.max(T(9,0),Math.min(S.t,T(18,0)));
+  let h='';
+  [0,1000,2000,3000].forEach(v=>{ h+='<line x1="44" x2="880" y1="'+Y(v)+'" y2="'+Y(v)+'" stroke="#1c2942"/><text x="38" y="'+(Y(v)+3)+'" text-anchor="end">'+v.toLocaleString()+'</text>'; });
+  for(let hh=9;hh<=18;hh++) h+='<text x="'+X(T(hh,0))+'" y="152" text-anchor="middle">'+pad(hh)+':00</text><line x1="'+X(T(hh,0))+'" x2="'+X(T(hh,0))+'" y1="118" y2="122" stroke="#31436a"/>';
+  let d=''; for(let t=T(9,0);t<=now;t+=300) d+=(d?'L':'M')+X(t).toFixed(1)+' '+Y(visitorsAt(t)).toFixed(1);
+  d+='L'+X(now).toFixed(1)+' '+Y(visitorsAt(now)).toFixed(1);
+  h+='<path d="'+d+'L'+X(now).toFixed(1)+' 118L44 118Z" fill="rgba(76,157,255,.14)"/><path d="'+d+'" fill="none" stroke="#4c9dff" stroke-width="1.75"/>';
+  h+='<circle cx="'+X(now)+'" cy="'+Y(visitorsAt(now))+'" r="3.5" fill="#4c9dff"/><line x1="'+X(now)+'" x2="'+X(now)+'" y1="18" y2="132" stroke="#8d9ab4" stroke-dasharray="2 3"/><text x="'+(X(now)-4)+'" y="14" text-anchor="end">현재 '+hm(now)+'</text>';
+  h+='<line x1="44" x2="880" y1="132" y2="132" stroke="#24334f"/><text x="38" y="135" text-anchor="end">경보</text>';
+  allEvents().filter(e=>e.t>=T(9,0)&&e.t<=T(18,0)).forEach(e=>{ const c=e.level===3?'#ff5f5f':e.level===2?'#f2b33d':'#4c9dff', x=X(e.t);
+    h+= e.level===3?'<path d="M'+x+' 126l5 9h-10z" fill="'+c+'"/>':e.level===2?'<path d="M'+x+' 127l5 5l-5 5l-5-5z" fill="'+c+'"/>':'<circle cx="'+x+'" cy="132" r="3.5" fill="'+c+'"/>'; });
+  if(S.viewT!=null) h+='<line x1="'+X(S.viewT)+'" x2="'+X(S.viewT)+'" y1="18" y2="132" stroke="#e7edf7"/>';
+  setHTML($('#tl'),h);
+  if(S.viewT!=null){ const n=allEvents().filter(e=>Math.abs(e.t-S.viewT)<=900);
+    setHTML($('#readout'),'<span style="color:var(--fg)">과거 조회 <b class="num">'+hm(S.viewT)+'</b></span><span>입장객 약 <b class="num">'+visitorsAt(S.viewT).toLocaleString()+'명</b></span><span>전후 15분 경보 '+n.length+'건'+(n.length?': '+esc(n.map(e=>e.title).join(', ')):'')+'</span><button class="btn sm" id="live">실시간으로 복귀</button>');
+  } else setHTML($('#readout'),'<span>그래프를 누르면 그 시각의 입장객 수와 경보를 조회합니다. 지도와 영상의 과거 재생은 2단계 범위입니다.</span>');
+}
+
+/* ---------- radio ---------- */
+function radio(x){ S.radio.push({t:S.t,x}); }
+function renderRadio(){
+  const m={on:['s-ok','● 송수신 중'],idle:['s-ok','○ 대기 중'],off:['s-dim','✕ 오프라인']};
+  setHTML($('#channels'), S.ch.map(c=>'<button class="ch" data-ch="'+c.id+'"><span><b>'+c.id+'</b> '+c.n+'</span><span class="'+m[c.st][0]+'">'+m[c.st][1]+'</span></button>').join(''));
+  setHTML($('#radioLog'), S.radio.slice().reverse().map(r=>'<span>'+fmt(r.t)+' '+r.x+'</span>').join(''));
+}
+
+/* ---------- dialogs ---------- */
+function dialog(html){ $('#dlg').innerHTML=html; $('#ov').hidden=false; const b=$('#dlg button'); if(b) b.focus(); }
+function closeDialog(){ $('#ov').hidden=true; }
+function showReport(){
+  dialog('<h3>사후 보고서 초안</h3><div style="color:var(--muted)">모의 시나리오 기록을 시간순으로 묶었습니다. 영상 클립과 통신 녹음 첨부는 4단계 범위입니다.</div><ol class="num">'+
+    S.journal.map(j=>'<li>'+fmt(j.t)+'  '+j.x+'</li>').join('')+'</ol><div class="btns"><button class="btn primary" data-dlg="close">닫기</button></div>');
+}
+
+/* ---------- scenario player ---------- */
+function auto(delay,fn){ S.autoQ.push({at:S.t+delay,fn}); }
+const SCN = {
+  ele:[
+    [2,()=>{ S.step='1/8 평상시. 코끼리 체온이 주의 범위입니다.'; select('animal','ele'); }],
+    [8,()=>{ const g=S.gates.forest[1]; g.locked=false; g.unauth=true; g.by='작업 일정 없음 '+hm(S.t);
+      const e=addEvent({level:2,title:'초식동물 숲 사육사 통로문 비인가 개방',desc:'작업 일정에 없는 스마트락 개방',zone:'forest',cam:'CAM-01',animal:'ele',evd:['스마트락 G-F2 개방']}); S._lockEv=e;
+      S.step='2/8 스마트락 G-F2 비인가 개방 감지 (Level 2).'; }],
+    [16,()=>{ A('ele').phase='approach'; S.step='3/8 코끼리가 펜스 쪽으로 이동 중.'; }],
+    [24,()=>{ if(S._lockEv&&S._lockEv.status==='new') S._lockEv.grouped=true;
+      addEvent({level:3,title:'코끼리 펜스 접근 및 이탈 징후',desc:'초식동물 숲 펜스 센서 가동 및 긴급 출동 요청',zone:'forest',cam:'CAM-01',animal:'ele',evd:['스마트락 G-F2 개방','펜스 진동 센서 F-12','CAM-01 동물 검출 0.94']});
+      S.step='4/8 서로 다른 근거 3건 일치, Level 3 사건 생성. 영상으로 확인하세요.';
+      auto(6,()=>{ const e=S.events.find(x=>x.level===3&&x.status==='new'); if(e) evAction('real',e.id); }); }]
+  ],
+  hill:[
+    [3,()=>{ S.hillIntrude=true; addEvent({level:2,title:'관람객 제한 구역 울타리 접근',desc:'바람의 언덕 2번 펜스 인근 무단 접근 감지',zone:'hill',cam:'CAM-04',evd:['CAM-04 사람 검출 0.93','가상 경계선 침범']});
+      S.step='1/3 관람객이 제한 구역 경계선을 넘었습니다 (Level 2).';
+      auto(6,()=>{ const e=S.events.find(x=>x.zone==='hill'&&x.status==='new'); if(e){ evAction('ack',e.id); radio('관제 → CH-1: 보안 2조, 바람의 언덕 2번 펜스 확인 바람'); S.step='2/3 확인 후 보안 2조에 배정.'; } });
+      auto(16,()=>{ const e=S.events.find(x=>x.zone==='hill'&&x.status==='ack'&&x.level===2); if(e){ evAction('close',e.id); radio('CH-1 보안 2조: 관람객 안내 완료'); S.step='3/3 현장 안내 완료, 종료.'; S.scn=null; } }); }]
+  ],
+  cam:[
+    [3,()=>{ S.camState['CAM-12']='delay'; addEvent({level:1,title:'CAM-12 연결 신호 지연',desc:'통신 네트워크 자동 복구 시도 중',zone:'kayak',cam:'CAM-12',status:'ack',owner:'시스템',evd:['프레임 지연 2.4초']});
+      S.step='1/2 CAM-12 신호 지연 (Level 1). 자동 복구를 시도합니다.'; }],
+    [18,()=>{ delete S.camState['CAM-12']; const e=S.events.find(x=>x.cam==='CAM-12'&&x.status==='ack'); if(e){ e.status='closed'; e.note='자동 복구'; } log('CAM-12 자동 복구'); S.step='2/2 자동 복구 완료, 종료.'; S.scn=null; }]
+  ]
+};
+function startScenario(){
+  init(); S.scn={id:$('#scnSel').value,start:S.t,cur:0}; S.speed=+$('#scnSpeed').value; S.step='시나리오 시작.'; renderAll();
+}
+
+/* ---------- simulation tick ---------- */
+function moveTo(o,tx,ty,v,dt){ const d=Math.hypot(tx-o.x,ty-o.y); if(d<0.5) return true; const s=Math.min(1,v*dt/d); o.x+=(tx-o.x)*s; o.y+=(ty-o.y)*s; return false; }
+const ESC=[{x:672,y:240},{x:650,y:270},{x:600,y:286},{x:545,y:300}];
+function tick(dt){
+  S.t+=dt;
+  if(S.scn){ const st=SCN[S.scn.id]; while(S.scn&&S.scn.cur<st.length&&S.t-S.scn.start>=st[S.scn.cur][0]){ const f=st[S.scn.cur][1]; S.scn.cur++; f(); } }
+  const due=S.autoQ.filter(a=>a.at<=S.t); S.autoQ=S.autoQ.filter(a=>a.at>S.t);
+  due.forEach(a=>{ if($('#scnAuto').checked) a.fn(); });
+  S.animals.forEach((a,i)=>{
+    if(a.id==='ele'&&a.phase!=='normal'){
+      if(a.phase==='approach') moveTo(a.pos,ESC[0].x,ESC[0].y,7,dt);
+      if(a.phase==='escaped'){ const w=ESC[Math.min(a.wp,ESC.length-1)]; if(moveTo(a.pos,w.x,w.y,3.2,dt)&&a.wp<ESC.length-1) a.wp++; }
+    } else { a.pos.x=a.home.x+8*Math.sin(S.t/11+i); a.pos.y=a.home.y+6*Math.cos(S.t/13+i*2); }
+  });
+  if(S.em){
+    const e=A(S.em.animal).pos; S.teams.forEach((t,i)=>moveTo(t,e.x-30+i*30,e.y+34,t.v,dt));
+    if(S.em.done[1]!=null) ZONES.forEach(z=>{ S.zones[z.id]=Math.max(0,S.zones[z.id]-(z.base*0.09+2)*dt); });
+  }
+}
+function renderAll(){ renderTop(); renderLayers(); renderAnimals(); liveVitals(); renderMap(); renderCams(); renderCamView(); liveCamStatus(); renderFeed(); renderEm(); renderTimeline(); renderRadio(); }
+
+/* ---------- input ---------- */
+document.addEventListener('click',ev=>{
+  const t=ev.target, c=s=>t.closest(s);
+  let el;
+  if((el=c('[data-ev]'))){ ev.stopPropagation(); return evAction(el.dataset.ev,el.dataset.id); }
+  if((el=c('[data-snap]'))){ ev.stopPropagation(); return dialog('<h3>증거 사진</h3><img class="snap" src="/api/events/'+encodeURIComponent(el.dataset.snap)+'/snapshot" alt="사건 순간의 화면"><div class="btns"><button class="btn primary" data-dlg="close">닫기</button></div>'); }
+  if((el=c('[data-check]'))){ doCheck(+el.dataset.check); return renderAll(); }
+  if((el=c('[data-em]'))){ if(el.disabled) return; if(el.dataset.em==='capture'){ capture(); return renderAll(); }
+    return dialog('<h3>비상 모드를 해제할까요?</h3><div>동물원장 승인이 확인된 경우에만 해제하세요. 해제 시각과 승인자가 기록됩니다.</div><div class="btns"><button class="btn" data-dlg="close">취소</button><button class="btn danger" data-dlg="release">승인 확인, 해제</button></div>'); }
+  if((el=c('[data-dlg]'))){ const k=el.dataset.dlg; closeDialog(); if(k==='release') release(); if(k==='cover'){ enterEmergency(null,'수동 발령 · 사건 정보 입력 필요'); } return renderAll(); }
+  if((el=c('[data-view]'))) return setView(el.dataset.view);
+  if((el=c('[data-cvedit]'))){ if(CV.edit){ CV.edit=null; return renderAll(); } return openEdit(); }
+  if((el=c('[data-ed]'))) return edAction(el.dataset.ed);
+  if((el=c('#edWrap'))&&CV.edit){ const b=el.getBoundingClientRect(); if(CV.edit.pts.length<64) CV.edit.pts.push([Math.min(1,Math.max(0,(ev.clientX-b.left)/b.width)), Math.min(1,Math.max(0,(ev.clientY-b.top)/b.height))]); CV.edit.msg=''; return drawEdit(); }
+  if((el=c('[data-cvlayout]'))){ CV.layout=el.dataset.cvlayout; return renderAll(); }
+  if((el=c('[data-cvpick]'))){ CV.cam=el.dataset.cvpick; return renderAll(); }
+  if((el=c('[data-cvcam]'))){ if(CV.layout==='one') CV.layout='grid'; else { CV.layout='one'; CV.cam=el.dataset.cvcam; } return renderAll(); }
+  if((el=c('[data-layer]'))){ S.layers[el.dataset.layer]=!S.layers[el.dataset.layer]; return renderAll(); }
+  if((el=c('[data-animal]'))) return select('animal',el.dataset.animal);
+  if((el=c('[data-cam]'))) return select('cam',el.dataset.cam);
+  if((el=c('[data-event]'))) return select('event',el.dataset.event);
+  if((el=c('[data-zone]'))) return select('zone',el.dataset.zone);
+  if((el=c('[data-ch]'))){ const ch=S.ch.find(x=>x.id===el.dataset.ch); if(ch.st==='off') radio(ch.id+' 오프라인: 송신 실패, 유선 인터컴으로 연락하세요'); else { ch.st='on'; radio('관제 → '+ch.id+' '+ch.n+': 송신'); } return renderRadio(); }
+  if(t.id==='live'){ S.viewT=null; return renderTimeline(); }
+  if(t.id==='ov') closeDialog();
+});
+document.addEventListener('keydown',ev=>{ if(ev.key==='Escape') closeDialog(); if(ev.key==='Enter'&&ev.target.matches('[data-event]')) select('event',ev.target.dataset.event); });
+$('#tl').addEventListener('click',ev=>{ const r=$('#tl').getBoundingClientRect(), x=(ev.clientX-r.left)/r.width*900; const t=T(9,0)+(x-44)/836*9*3600; S.viewT=Math.max(T(9,0),Math.min(S.t,t)); renderTimeline(); });
+$('#q').addEventListener('input',renderAnimals); $('#riskF').addEventListener('change',renderAnimals); $('#showDone').addEventListener('change',renderFeed);
+$('#scnPlay').addEventListener('click',startScenario);
+$('#scnPause').addEventListener('click',()=>{ S.playing=!S.playing; $('#scnPause').textContent=S.playing?'일시정지':'계속'; });
+$('#scnReset').addEventListener('click',()=>{ init(); renderAll(); });
+$('#scnSpeed').addEventListener('change',e=>{ S.speed=+e.target.value; });
+(function(){ const b=$('#cover'); let tm=null;
+  const ask=()=>dialog('<h3>비상 모드를 발령할까요?</h3><div>대응조가 호출되고 대피로가 지도에 표시됩니다. 발령자와 시각이 기록됩니다.</div><div class="btns"><button class="btn" data-dlg="close">취소</button><button class="btn danger" data-dlg="cover">비상 모드 발령</button></div>');
+  const stop=()=>{ clearTimeout(tm); tm=null; b.classList.remove('holding'); };
+  b.addEventListener('pointerdown',()=>{ if(S.em) return; b.classList.add('holding'); tm=setTimeout(()=>{ stop(); ask(); },2000); });
+  ['pointerup','pointerleave','pointercancel'].forEach(k=>b.addEventListener(k,stop));
+  b.addEventListener('click',e=>{ e.stopPropagation(); if(e.detail===0&&!S.em) ask(); });
+})();
+
+init(); if(location.hash==='#cameras') VIEW='cam'; if(location.hash==='#csv') VIEW='csv';
+$('#csvCam').insertAdjacentHTML('beforeend', CAMS.filter(c=>c.live).map(c=>'<option value="'+c.live+'">'+c.id+' '+c.name+'</option>').join(''));
+$('#csvDay').value=CSVV.day;
+$('#csvDay').addEventListener('change',e=>{ CSVV.day=e.target.value||today(); e.target.value=CSVV.day; CSVV.state='idle'; CSVV.rows=[]; renderCsv(); loadCsv(); });
+['csvCam','csvSev'].forEach(id=>$('#'+id).addEventListener('change',renderCsv));
+$('#csvQ').addEventListener('input',renderCsv);
+$('#csvReload').addEventListener('click',loadCsv);
+$('#logout').addEventListener('click',()=>{ fetch('/api/logout',{method:'POST'}).then(toLogin,toLogin); });
+$('#csvAi').addEventListener('click',()=>{
+  CSVV.aiErr='';
+  fetch('/api/ai/judge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({day:CSVV.day})})
+    .then(r=>r.json().then(d=>({ok:r.ok,d})))
+    .then(res=>{ if(!res.ok) CSVV.aiErr='요청하지 못했습니다: '+(res.d.detail||'서버 오류'); else if(!res.d.total) CSVV.aiErr='판단할 미확인 사건이 없습니다.'; renderCsv(); })
+    .catch(()=>{ CSVV.aiErr='요청하지 못했습니다. 서버 실행 상태를 확인하세요.'; renderCsv(); });
+});
+renderAll(); connect(); if(VIEW==='csv') renderCsv();
+let last=performance.now(), acc=0;
+setInterval(()=>{ const n=performance.now(), dt=Math.min(1,(n-last)/1000); last=n; if(!S.playing) return; tick(dt*S.speed); acc+=dt;
+  renderTop(); liveVitals(); renderMap(); renderCams(); renderCamView(); liveCamStatus(); liveCountdown(); renderEm();
+  if(acc>=1){ acc=0; if(VIEW==='csv') renderCsv();
+    if(VIEW==='csv'&&(CSVV.state==='idle'||CSVV.state==='offline'||(++CSVV.tick%5===0&&CSVV.day===today()))) loadCsv();
+    renderAnimals(); liveVitals(); renderFeed(); renderTimeline(); renderRadio(); }
+},250);
+})();
+</script>
