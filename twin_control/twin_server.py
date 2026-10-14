@@ -11,6 +11,7 @@ zoo_safe/zoo_vision_jev_new.py의 분석 엔진(LinkedAnalyzer)을 그대로 돌
     /api/events.csv?day=...        같은 내용의 CSV 파일
     /api/ai/judge                  하루치 미확인 사건을 이 PC의 Ollama TEV에 일괄 판단 요청 (POST)
     /api/ai/job                    일괄 판단 진행 상황
+    /api/ai/decisions?day=...      AI에 보낸 요약과 받은 응답의 기록
     /api/events/{id}/ack           사건 확인
     /api/events/{id}/review        검토 구분 기록 (실제 위험 / 오탐 / 판단 보류)
     /api/events/{id}/snapshot      사건 순간의 증거 사진
@@ -26,6 +27,9 @@ zoo_safe/zoo_vision_jev_new.py의 분석 엔진(LinkedAnalyzer)을 그대로 돌
 계정이 하나라도 있으면 모든 화면과 영상이 로그인을 요구한다. 계정 없이 --host를 바꾸면 실행을 거부한다.
 admin은 구역 편집까지, operator는 사건 확인·검토와 AI 판단 요청까지 할 수 있다.
 암호화(HTTPS)는 하지 않는다. 같은 건물의 내부망에서만 쓰고, 인터넷에 직접 열지 않는다.
+
+Cloudflare Tunnel처럼 이 PC 안에서 서버로 들어오는 터널로 공개할 때는 --require-login 을 붙인다.
+터널은 127.0.0.1로 접속하므로, 이 옵션이 없으면 계정이 없어도 서버가 켜져 누구나 들어온다.
 여기에 없는 옵션(--weights, --conf, --device 등)은 분석 엔진으로 그대로 넘어간다.
 --ollama를 붙이면 진행 중인 사건마다 TEV 판단을 실시간으로 받는다. 붙이지 않아도 일괄 판단은 된다.
 AI 판단은 참고 정보다. 사건의 확인 상태와 규칙 경고를 바꾸지 않는다.
@@ -56,6 +60,7 @@ from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 
+import twin_ai
 import twin_vision
 from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response,
                                StreamingResponse)
@@ -71,6 +76,7 @@ EVENT_LIMIT = 60   # 화면에 넘기는 오늘 사건 수 (최근 것부터)
 EVENT_ID = re.compile(r'^[0-9a-f]{32}$')
 REVIEW_LABELS = ('실제 위험', '오탐', '판단 보류')
 DAY = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+DECISION_LIMIT = 300     # 판단 AI 탭에 한 번에 보내는 기록 수 (최근 것부터)
 USER_NAME = re.compile(r'^[A-Za-z0-9가-힣_.-]{2,32}$')
 ROLES = ('admin', 'operator')
 PASSWORD_MIN = 10
@@ -114,7 +120,6 @@ BATCH_TIMEOUT = 90       # 첫 호출은 모델을 올리느라 오래 걸린다
 AI_ANSWERED = ('completed', 'stale', 'batch_completed')
 AI_WAITING = ('pending', 'running', 'batch_running')
 AI_FAILED = ('error', 'unavailable', 'batch_error')
-SEVERITY_EN = {'경고': 'warning', '주의': 'caution', '참고': 'info'}
 CSV_FIELDS = ('detected_at', 'camera_id', 'track_id', 'object', 'zone', 'event_type', 'severity',
               'message', 'confidence', 'active', 'ended_at', 'end_reason', 'acknowledged_at',
               'ack_name', 'review_label', 'review_note', 'snapshot_path')
@@ -179,6 +184,7 @@ def own_options(argv):
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--port', type=int, default=8765)
     parser.add_argument('--host', default='127.0.0.1')
+    parser.add_argument('--require-login', action='store_true')
     parser.add_argument('--data-dir', type=Path, default=HERE / 'twin_data')
     parser.add_argument('--add-user')
     parser.add_argument('--role', choices=ROLES, default='operator')
@@ -187,14 +193,43 @@ def own_options(argv):
     return parser.parse_known_args(argv)
 
 
+def read_password(prompt):
+    """비밀번호를 받는다. getpass는 아무것도 보여 주지 않아 입력이 안 되는 것처럼 보이므로 * 를 찍는다."""
+    try:
+        import msvcrt
+    except ImportError:
+        return getpass.getpass(prompt)
+    if not sys.stdin.isatty():
+        return getpass.getpass(prompt)
+    print(prompt, end='', flush=True)
+    typed = []
+    while True:
+        key = msvcrt.getwch()
+        if key in ('\r', '\n'):
+            print()
+            return ''.join(typed)
+        if key == '\x03':
+            raise KeyboardInterrupt
+        if key in ('\x00', '\xe0'):      # 방향키 같은 기능키는 두 글자로 온다. 둘 다 버린다.
+            msvcrt.getwch()
+        elif key == '\b':
+            if typed:
+                typed.pop()
+                print('\b \b', end='', flush=True)
+        elif key.isprintable():
+            typed.append(key)
+            print('*', end='', flush=True)
+
+
 def account_command(own):
     """계정 명령이면 처리하고 True. 비밀번호는 명령줄이 아니라 입력창에서 받는다."""
     if not (own.add_user or own.remove_user or own.list_users):
         return False
     accounts = Accounts(own.data_dir)
     if own.add_user:
-        first = getpass.getpass(f'{own.add_user} 비밀번호 ({PASSWORD_MIN}자 이상): ')
-        if first != getpass.getpass('한 번 더 입력: '):
+        print('비밀번호는 글자 대신 * 로 표시됩니다. 한/영 키로 영문 입력 상태인지 확인하고, 다 치면 Enter를 누르세요.')
+        first = read_password(f'{own.add_user} 비밀번호 ({PASSWORD_MIN}자 이상): ')
+        if first != read_password('한 번 더 입력: '):
             raise SystemExit('두 입력이 다릅니다. 계정을 만들지 않았습니다.')
         try:
             accounts.add(own.add_user, own.role, first)
@@ -294,40 +329,8 @@ def create_app(zj, engine, args, accounts):
         return [event_view(row, answers.get(row['id'])) for row in rows]
 
     def review_state(row, day_rows_):
-        """끝난 사건을 나중에 판단시킬 때 보내는 요약. 사건 당시 저장해 둔 요약이 있으면 그것을 쓴다."""
         with engine.db.connect() as db:
-            stored = db.execute('SELECT state_json FROM decisions WHERE event_id=? AND state_json IS NOT NULL '
-                                'ORDER BY rowid DESC LIMIT 1', (row['id'],)).fetchone()
-        cid, name = row.get('camera_id'), row.get('object')
-        if stored:
-            state = json.loads(stored[0])
-        else:
-            person = row.get('event_type') == 'PERSON_INTRUSION'
-            state = dict(
-                schema_version='1.0',
-                source=dict(camera_id=cid, mode='recorded_video_demo', observed_at=row.get('detected_at')),
-                subject=dict(detected_class=name,
-                             class_is_proxy=twin_vision.is_proxy(cid, name),
-                             detector_confidence_min=row.get('confidence')),
-                evidence=dict(current_roi_relation='inside' if person else 'outside',
-                              previously_observed_safe=row.get('event_type') == 'ZONE_EXIT_DANGER'),
-                context=dict(authorized_work='unknown', physical_barrier_status='unknown',
-                             person_identity='unknown'),
-                policy=dict(version=zj.POLICY_VERSION, roi_meaning='permitted animal area',
-                            animal_outside='alert when an animal foot is outside the ROI; not proof of escape',
-                            person_outside='not an alert',
-                            safety_rule='AI must not clear the rule alarm or control equipment. '
-                                        'Missing information is not evidence of safety.'))
-        at = row.get('detected_at') or ''
-        window = [other for other in day_rows_
-                  if other['id'] != row['id'] and other.get('camera_id') == cid
-                  and (other.get('detected_at') or '') <= at
-                  and _seconds(at) - _seconds(other.get('detected_at') or '') <= 600]
-        state['review'] = dict(
-            mode='post_hoc_review', event_still_active=bool(row['active']), end_reason=row['end_reason'],
-            rule_event_type=row.get('event_type'), rule_severity=SEVERITY_EN.get(row.get('severity')),
-            same_camera_events_previous_10min=len(window))
-        return state
+            return twin_ai.review_state(db, zj, row, day_rows_)
 
     def run_batch(day, targets, day_rows_):
         streak = 0
@@ -490,6 +493,9 @@ def create_app(zj, engine, args, accounts):
         if not local_origin(request.headers):
             raise HTTPException(403, '이 관제 화면에서만 요청할 수 있습니다.')
         address, current = request.client.host if request.client else '', time.time()
+        if address in LOOPBACK and request.headers.get('cf-connecting-ip'):
+            # 터널을 거치면 모두 이 PC에서 온 것처럼 보인다. 잠금은 터널이 알려 준 접속자 주소로 건다.
+            address = request.headers['cf-connecting-ip']
         with session_lock:
             count, until = failures.get(address, (0, 0))
         if until > current:
@@ -508,7 +514,8 @@ def create_app(zj, engine, args, accounts):
         if role is None:
             raise HTTPException(401, '이름 또는 비밀번호가 맞지 않습니다.')
         response = JSONResponse({'name': name, 'role': role})
-        response.set_cookie(COOKIE, token, max_age=SESSION_SEC, httponly=True, samesite='strict', path='/')
+        response.set_cookie(COOKIE, token, max_age=SESSION_SEC, httponly=True, samesite='strict', path='/',
+                            secure=request.headers.get('x-forwarded-proto') == 'https')
         return response
 
     @app.post('/api/logout')
@@ -645,15 +652,15 @@ def create_app(zj, engine, args, accounts):
 
     @app.post('/api/ai/judge')
     async def ai_judge(request: Request):
-        """그날의 미확인 사건 가운데 아직 AI 답이 없는 것만 판단을 요청한다. 확인 상태는 바꾸지 않는다."""
+        """그날 사건 가운데 아직 AI 답이 없는 것만 판단을 요청한다. 확인 상태는 바꾸지 않는다."""
         if not local_origin(request.headers):
             raise HTTPException(403, '이 관제 화면에서만 요청할 수 있습니다.')
         need(request, *ROLES)
         body = await request.json()
         day, rows = day_rows(str(body.get('day') or ''))
         answers = ai_for(row['id'] for row in rows)
-        targets = [row for row in rows if not row['acknowledged_at']
-                   and (answers.get(row['id']) or {}).get('state') != 'answered'][:BATCH_LIMIT]
+        targets = [row for row in rows
+                   if (answers.get(row['id']) or {}).get('state') != 'answered'][:BATCH_LIMIT]
         with job_lock:
             if job['running']:
                 raise HTTPException(409, '이미 판단 요청이 진행 중입니다.')
@@ -663,6 +670,42 @@ def create_app(zj, engine, args, accounts):
         if targets:
             threading.Thread(target=run_batch, args=(day, targets, rows), daemon=True, name='ai-batch').start()
         return snapshot
+
+    @app.get('/api/ai/decisions')
+    def ai_decisions(day: str = '', sent_only: bool = True):
+        """그날 AI에 보낸 요약과 받은 응답. sent_only면 모델을 부르지 않은 기록(전송 안 함)은 뺀다."""
+        day = day or zj.now().date().isoformat()
+        if not DAY.match(day):
+            raise HTTPException(400, '날짜는 YYYY-MM-DD 형식입니다.')
+        with engine.db.connect() as db:
+            rows = db.execute(
+                'SELECT id, event_id, requested_at, status, state_json, result_json, error, model_requested '
+                'FROM decisions WHERE requested_at LIKE ? ' + ("AND status != 'disabled' " if sent_only else '')
+                + 'ORDER BY rowid DESC LIMIT ?', (day + '%', DECISION_LIMIT)).fetchall()
+            total = db.execute('SELECT count(*) FROM decisions WHERE requested_at LIKE ?'
+                               + (" AND status != 'disabled'" if sent_only else ''), (day + '%',)).fetchone()[0]
+        events, records = {}, []
+        for row in rows:
+            eid = row['event_id']
+            if eid not in events:
+                found = engine.db.record(eid) if eid else None
+                events[eid] = event_view(found) if found else None
+            status = row['status']
+            record = dict(
+                id=row['id'], at=row['requested_at'], status=status, model=row['model_requested'],
+                mode='eval' if status.startswith('eval') else 'batch' if status.startswith('batch') else 'live',
+                error=row['error'] or '', event=events[eid], answer=None, latency_ms=None, usage=None,
+                state=json.loads(row['state_json']) if row['state_json'] else None)
+            if row['result_json']:
+                result = json.loads(row['result_json'])
+                situation = result['answers']['situation']
+                record.update(
+                    latency_ms=result.get('latency_ms'), usage=result.get('usage'),
+                    answer=dict(choice=situation['choice'], probabilities=situation['probabilities'],
+                                confidence=situation.get('confidence'),
+                                needs_review=result['answers']['needs_immediate_review']['noul']))
+            records.append(record)
+        return dict(day=day, total=total, shown=len(records), records=records)
 
     def camera(camera_id):
         if camera_id not in engine.runtime:
@@ -739,12 +782,6 @@ def create_app(zj, engine, args, accounts):
     return app
 
 
-def _seconds(stamp):
-    """'YYYY-MM-DD HH:MM:SS'의 하루 중 초. 형식이 다르면 0."""
-    match = re.search(r'(\d\d):(\d\d):(\d\d)', stamp or '')
-    return int(match[1]) * 3600 + int(match[2]) * 60 + int(match[3]) if match else 0
-
-
 def main():
     import uvicorn
     own, rest = own_options(sys.argv[1:])
@@ -752,6 +789,9 @@ def main():
         return
     accounts = Accounts(own.data_dir)
     users = accounts.users()
+    if own.require_login and not users:
+        raise SystemExit('--require-login: 계정이 없어 시작하지 않습니다. 먼저 실행하세요:\n'
+                         '  python twin_server.py --add-user 이름 --role admin')
     if own.host not in LOOPBACK and not users:
         raise SystemExit('다른 PC에서 접속하게 하려면 계정이 필요합니다. 먼저 실행하세요:\n'
                          '  python twin_server.py --add-user 이름 --role admin')

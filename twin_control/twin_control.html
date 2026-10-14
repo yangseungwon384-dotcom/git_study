@@ -182,6 +182,28 @@ body.em .grid{grid-template-columns:260px minmax(0,1fr) 350px}
 .csv-sum b{color:var(--fg)}
 a.btn{text-decoration:none;display:inline-block}
 a.btn[aria-disabled="true"]{opacity:.45;pointer-events:none}
+.btn.rv{margin-right:4px;color:var(--muted)}
+.btn.rv.on{background:var(--accent-bg);border-color:var(--accent);color:var(--fg);font-weight:600}
+
+/* AI judgment record tab */
+.ai-list{display:flex;flex-direction:column;gap:8px}
+.ai-rec{padding:10px 14px;display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:8px 24px}
+.ai-rec .hd{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12px;color:var(--muted);align-items:baseline}
+.ai-rec .hd b{color:var(--fg);font-size:13px}
+.ai-verdict{font-size:15px;font-weight:600}
+.ai-sub{font-size:12px;color:var(--muted);margin-top:2px}
+.bars{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:3px 8px;align-items:center;font-size:12px}
+.bars .t{color:var(--muted)} .bars .t.hi{color:var(--fg);font-weight:600}
+.bars .b{height:8px;background:var(--panel-2);border-radius:4px;overflow:hidden}
+.bars .b i{display:block;height:100%;background:var(--line-2)} .bars .b i.hi{background:var(--accent)}
+.meter{height:8px;background:var(--panel-2);border-radius:4px;overflow:hidden;margin-top:4px;max-width:220px}
+.meter i{display:block;height:100%;background:var(--warn)}
+.ai-rec details{grid-column:1/-1;font-size:12px}
+.ai-rec summary{cursor:pointer;color:var(--muted)}
+.ai-rec pre{margin:6px 0 0;padding:8px 10px;background:#0c1626;border-radius:6px;overflow-x:auto;font-family:var(--mono);font-size:11.5px;line-height:1.5;color:var(--fg);max-height:320px}
+.ai-facts{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 14px;margin-top:6px}
+.ai-facts dt{color:var(--muted)} .ai-facts dd{margin:0}
+@media (max-width:900px){.ai-rec{grid-template-columns:minmax(0,1fr)}}
 
 /* dialog */
 .ov{position:fixed;inset:0;background:rgba(3,7,14,.72);display:flex;align-items:center;justify-content:center;padding:16px;z-index:10}
@@ -214,7 +236,24 @@ a.btn[aria-disabled="true"]{opacity:.45;pointer-events:none}
     <button role="tab" data-view="dash" aria-selected="true">통합 관제</button>
     <button role="tab" data-view="cam" aria-selected="false">카메라<span class="cnt" id="camAlarmCnt" hidden></span></button>
     <button role="tab" data-view="csv" aria-selected="false">CSV 기록</button>
+    <button role="tab" data-view="ai" aria-selected="false">판단 AI</button>
   </nav>
+
+  <section id="aiView" hidden>
+    <div class="col">
+      <div class="cv-bar">
+        <label for="aiDay">날짜 <input type="date" id="aiDay" class="filter"></label>
+        <select id="aiMode" class="filter" aria-label="요청 방식 필터"><option value="">전체 방식</option><option value="live">실시간</option><option value="batch">일괄 판단</option><option value="eval">채점</option></select>
+        <select id="aiChoice" class="filter" aria-label="판단 결과 필터"><option value="">전체 결과</option></select>
+        <input id="aiQ" type="search" class="search" style="max-width:240px" placeholder="카메라, 객체, 유형 검색" aria-label="기록 검색">
+        <label class="toggle" for="aiAll"><input type="checkbox" id="aiAll"> 모델에 보내지 않은 기록도 표시</label>
+        <span class="sp"></span>
+        <button class="btn" id="aiReload">새로고침</button>
+      </div>
+      <div class="csv-sum" id="aiSum"></div>
+      <div class="ai-list" id="aiList"></div>
+    </div>
+  </section>
 
   <section id="csvView" hidden>
     <div class="col">
@@ -222,6 +261,7 @@ a.btn[aria-disabled="true"]{opacity:.45;pointer-events:none}
         <label for="csvDay">날짜 <input type="date" id="csvDay" class="filter"></label>
         <select id="csvCam" class="filter" aria-label="카메라 필터"><option value="">전체 카메라</option></select>
         <select id="csvSev" class="filter" aria-label="심각도 필터"><option value="">전체 심각도</option><option>경고</option><option>주의</option><option>참고</option></select>
+        <select id="csvRv" class="filter" aria-label="판정 상태 필터"><option value="">전체 판정 상태</option><option value="none">미판정만</option><option value="done">판정된 것만</option></select>
         <input id="csvQ" type="search" class="search" style="max-width:260px" placeholder="객체, 유형, 메시지 검색" aria-label="사건 검색">
         <span class="sp"></span>
         <button class="btn" id="csvAi" disabled>AI 판단 요청</button>
@@ -233,7 +273,7 @@ a.btn[aria-disabled="true"]{opacity:.45;pointer-events:none}
       <section class="panel">
         <div class="tbl-wrap">
           <table class="tbl">
-            <thead><tr><th>시각</th><th>카메라</th><th>객체</th><th>유형</th><th>심각도</th><th>신뢰도</th><th>상태</th><th>확인</th><th>검토</th><th>AI 참고 판단</th><th>메시지</th><th>증거</th></tr></thead>
+            <thead><tr><th>시각</th><th>카메라</th><th>객체</th><th>유형</th><th>심각도</th><th>신뢰도</th><th>상태</th><th>확인</th><th>사람 판정</th><th>AI 참고 판단</th><th>메시지</th><th>증거</th></tr></thead>
             <tbody id="csvBody"></tbody>
           </table>
         </div>
@@ -372,6 +412,9 @@ const esc = v => String(v==null?'':v).replace(/[&<>"']/g, c => ({'&':'&amp;','<'
 const LIVE = {on:false, cams:[], events:[], alarm:new Set(), boot:'', ai:null, me:null};
 const toLogin = () => { location.href='/login'; };
 const AI_KO = {NORMAL:'평상시', AUTHORIZED_ACTIVITY:'허가된 작업', BOUNDARY_CONCERN:'구역 이탈 우려', PERSON_INTRUSION_CONCERN:'사람 침입 우려', INSUFFICIENT_EVIDENCE:'증거 부족', OTHER:'기타'};
+/* 사람 판정 버튼과, TEV 분류를 사람 판정 구분에 맞춘 것 (twin_ai.py의 predicted_label과 같다). */
+const RV = [['실제 위험','위험'],['오탐','오탐'],['판단 보류','보류']];
+const aiLabel = ai => ['BOUNDARY_CONCERN','PERSON_INTRUSION_CONCERN'].includes(ai.choice) ? '실제 위험' : ['NORMAL','AUTHORIZED_ACTIVITY'].includes(ai.choice) ? '오탐' : '판단 보류';
 function aiText(ai){
   if(!ai) return '';
   if(ai.state==='waiting') return '판단 기다리는 중';
@@ -718,7 +761,7 @@ function camInfo(cid){
 }
 function renderCamView(){
   const on=VIEW==='cam', dash=VIEW==='dash';
-  $('#camView').hidden=!on; $('#csvView').hidden=VIEW!=='csv'; $('#dash').hidden=!dash; $('#dashBottom').hidden=!dash; $('#scnBar').hidden=!dash;
+  $('#camView').hidden=!on; $('#csvView').hidden=VIEW!=='csv'; $('#aiView').hidden=VIEW!=='ai'; $('#dash').hidden=!dash; $('#dashBottom').hidden=!dash; $('#scnBar').hidden=!dash;
   document.querySelectorAll('[data-view]').forEach(b=>b.setAttribute('aria-selected', String(b.dataset.view===VIEW)));
   const ids=cvCams(), alarms=ids.filter(camAlarm).length, cnt=$('#camAlarmCnt');
   cnt.hidden=!alarms; cnt.textContent=alarms;
@@ -808,21 +851,24 @@ function loadCsv(){
 }
 function renderCsv(){
   if(VIEW!=='csv') return;
-  const cam=$('#csvCam').value, sev=$('#csvSev').value, q=$('#csvQ').value.trim().toLowerCase(), dl=$('#csvDl');
+  const cam=$('#csvCam').value, sev=$('#csvSev').value, rv=$('#csvRv').value, q=$('#csvQ').value.trim().toLowerCase(), dl=$('#csvDl');
   if(LIVE.on){ dl.setAttribute('href','/api/events.csv?day='+encodeURIComponent(CSVV.day)); dl.setAttribute('aria-disabled','false'); }
   else { dl.removeAttribute('href'); dl.setAttribute('aria-disabled','true'); }
-  const all=CSVV.rows, rows=all.filter(e=>(!cam||e.raw.camera_id===cam)&&(!sev||e.raw.severity===sev)&&
+  const all=CSVV.rows, rows=all.filter(e=>(!cam||e.raw.camera_id===cam)&&(!sev||e.raw.severity===sev)&&(!rv||(rv==='done')===!!e.raw.review_label)&&
     (!q||[e.title,e.desc,e.raw.object,e.raw.event_type,e.cam||''].join(' ').toLowerCase().includes(q))).sort((a,b)=>b.t-a.t);
   const n=k=>all.filter(e=>e.raw.severity===k).length;
-  const answered=all.filter(e=>e.ai&&e.ai.state==='answered').length, todo=all.filter(e=>!e.raw.acknowledged_at&&!(e.ai&&e.ai.state==='answered')).length;
+  const answered=all.filter(e=>e.ai&&e.ai.state==='answered').length, todo=all.filter(e=>!(e.ai&&e.ai.state==='answered')).length;
+  const judged=all.filter(e=>e.raw.review_label), both=judged.filter(e=>e.ai&&e.ai.state==='answered'), same=both.filter(e=>aiLabel(e.ai)===e.raw.review_label).length;
+  const missed=both.filter(e=>e.raw.review_label==='실제 위험'&&aiLabel(e.ai)==='오탐').length;
   const job=LIVE.on&&LIVE.ai?LIVE.ai.job:null, busy=!!(job&&job.running), btn=$('#csvAi');
   btn.disabled=!LIVE.on||busy||CSVV.state!=='ok'||!todo;
-  btn.textContent=busy?'AI 판단 중 '+job.done+'/'+job.total:'AI 판단 요청'+(todo?' (미확인 '+todo+'건)':'');
+  btn.textContent=busy?'AI 판단 중 '+job.done+'/'+job.total:'AI 판단 요청'+(todo?' (답 없는 '+todo+'건)':'');
   setHTML($('#csvAiMsg'), !LIVE.on||!LIVE.ai ? ''
     : '<span>AI 판단 <b class="num">'+answered+'건</b> · 모델 '+esc(LIVE.ai.model)+' · 실시간 판단 '+(LIVE.ai.live?'켜짐':'꺼짐 (서버를 --ollama로 실행하면 켜짐)')+'</span>'+
       (busy?'<span>'+esc(job.day)+' 일괄 판단 진행 중 <b class="num">'+job.done+'/'+job.total+'</b>'+(job.errors?' · 실패 '+job.errors:'')+'</span>'
         :job&&job.finished_at&&job.total?'<span>마지막 일괄 판단: '+esc(job.day)+' '+job.total+'건 중 '+(job.done-job.errors)+'건 완료'+(job.errors?', 실패 '+job.errors:'')+(job.last_error?' · <span class="s-warn">'+esc(job.last_error)+'</span>':'')+'</span>':'')+
       (CSVV.aiErr?'<span class="s-warn">'+esc(CSVV.aiErr)+'</span>':'')+
+      '<span>사람 판정 <b class="num">'+judged.length+'/'+all.length+'건</b>'+(both.length?' · AI와 일치 <b class="num">'+same+'/'+both.length+'</b>'+(missed?' · <span class="s-crit">실제 위험을 AI가 오탐으로 본 것 '+missed+'건</span>':''):'')+'</span>'+
       '<span>AI 판단은 참고용이며 사건의 확인 상태를 바꾸지 않습니다.</span>');
   if(job && CSVV.jobDone!==job.done+':'+job.running){ const first=CSVV.jobDone===undefined; CSVV.jobDone=job.done+':'+job.running; if(!first && job.day===CSVV.day) loadCsv(); }
   setHTML($('#csvSum'),
@@ -837,15 +883,100 @@ function renderCsv(){
       '<td class="nw">'+esc(TYPE_KO[r.event_type]||r.event_type)+'</td><td class="nw '+(r.severity==='경고'?'s-warn':'')+'">'+esc(r.severity)+'</td><td class="nw num">'+Number(r.confidence).toFixed(2)+'</td>'+
       '<td class="nw">'+(r.active?'<span class="s-crit">진행 중</span>':'종료'+(r.end_reason_ko?' ('+esc(r.end_reason_ko)+')':''))+'</td>'+
       '<td class="nw">'+(r.acknowledged_at?esc(r.acknowledged_at.slice(11,19))+' '+esc(r.ack_name||''):'<span class="s-warn">미확인</span>')+'</td>'+
-      '<td class="nw">'+esc(r.review_label||'')+'</td><td class="nw'+(e.ai&&e.ai.state==='failed'?' s-warn':'')+'">'+esc(aiText(e.ai))+'</td><td class="msg">'+esc(r.message||'')+'</td>'+
+      '<td class="nw">'+RV.map(v=>'<button class="btn sm rv'+(r.review_label===v[0]?' on':'')+'" data-rv="'+v[0]+'" data-id="'+esc(r.id)+'" aria-pressed="'+(r.review_label===v[0])+'" title="'+v[0]+'">'+v[1]+'</button>').join('')+'</td><td class="nw'+(e.ai&&e.ai.state==='failed'?' s-warn':'')+'">'+esc(aiText(e.ai))+'</td><td class="msg">'+esc(r.message||'')+'</td>'+
       '<td class="nw">'+(r.has_snapshot?'<button class="btn sm" data-snap="'+esc(r.id)+'">사진</button>':'')+'</td></tr>'; }).join('')
     : '<tr><td colspan="12" style="color:var(--muted)">'+(CSVV.state==='ok'?(all.length?'필터 조건에 맞는 사건이 없습니다.':'이 날짜에 기록된 사건이 없습니다.'):'표시할 기록이 없습니다.')+'</td></tr>');
 }
+/* ---------- AI judgment record (판단 AI tab) ---------- */
+const AIV = {day:today(), recs:[], total:0, state:'idle', tick:0, open:new Set()};
+const MODE_KO = {live:'실시간', batch:'일괄 판단', eval:'채점'};
+const AISTATUS_KO = {completed:'답 받음', stale:'답 받음 (사건이 먼저 끝남)', batch_completed:'답 받음', eval_completed:'답 받음',
+  pending:'대기 중', running:'판단 중', batch_running:'판단 중', error:'오류', unavailable:'연결 실패', batch_error:'오류',
+  disabled:'보내지 않음', superseded:'새 요청으로 대체됨', queue_full:'대기열이 가득 차 버려짐', interrupted:'서버 재시작으로 중단'};
+const RELATION_KO = {inside:'구역 안', outside:'구역 밖', bottom_edge:'화면 맨 아래'};
+const aiStatus = r => r.status==='stale'&&!r.answer ? '사건이 먼저 끝나 보내지 않음' : AISTATUS_KO[r.status]||r.status;
+const yn = v => v===true ? '예' : v===false ? '아니오' : v==null ? '모름' : String(v);
+function loadAi(){
+  if(!LIVE.on){ AIV.state='offline'; return renderAi(); }
+  const day=AIV.day;
+  fetch('/api/ai/decisions?day='+encodeURIComponent(day)+'&sent_only='+(!$('#aiAll').checked))
+    .then(r=>{ if(r.status===401) toLogin(); return r.json().then(d=>({ok:r.ok,d})); }).then(res=>{
+      if(day!==AIV.day) return;
+      if(!res.ok){ AIV.state='error'; AIV.err=res.d.detail||'서버 오류'; AIV.recs=[]; }
+      else { AIV.state='ok'; AIV.recs=res.d.records; AIV.total=res.d.total; }
+      renderAi();
+    }).catch(()=>{ AIV.state='error'; AIV.err='서버에 연결하지 못했습니다'; AIV.recs=[]; renderAi(); });
+}
+function aiFacts(st){
+  if(!st) return '';
+  const e=st.evidence||{}, sub=st.subject||{}, c=st.context||{}, rv=st.review||{}, rows=[
+    ['탐지 클래스', (sub.detected_class||'')+(sub.class_is_proxy?' (실제 종명 아님)':'')],
+    ['탐지 신뢰도 최저', sub.detector_confidence_min],
+    ['구역과의 관계', RELATION_KO[e.current_roi_relation]||e.current_roi_relation],
+    ['이전에 안전구역에서 관측', yn(e.previously_observed_safe)],
+    ['위반 지속 시간', e.violation_observed_span_sec==null?null:e.violation_observed_span_sec+'초'],
+    ['최근 위반 관측 수', e.recent_violation_samples],
+    ['같은 화면에 사람', yn(e.person_detected_in_same_camera)],
+    ['허가된 작업 여부', yn(c.authorized_work==='unknown'?null:c.authorized_work)],
+    ['물리 장벽 상태', yn(c.physical_barrier_status==='unknown'?null:c.physical_barrier_status)],
+    ['사후 판단', rv.mode?'예 (종료 사유: '+(rv.end_reason||'없음')+')':null],
+    ['같은 카메라 직전 10분 사건', rv.same_camera_events_previous_10min]
+  ].filter(r=>r[1]!=null&&r[1]!=='');
+  return '<dl class="ai-facts">'+rows.map(r=>'<dt>'+r[0]+'</dt><dd>'+esc(r[1])+'</dd>').join('')+'</dl>';
+}
+function aiRecord(r){
+  const ev=r.event, a=r.answer, cam=ev&&CAMS.find(c=>c.live===ev.camera_id);
+  const title=ev ? (cam?cam.id:ev.camera_id)+' · '+(ev.object_ko||ev.object)+' '+(TYPE_KO[ev.event_type]||ev.event_type) : '사건 기록 없음';
+  let left, right='';
+  if(a){
+    const keys=Object.keys(a.probabilities).sort((x,y)=>a.probabilities[y]-a.probabilities[x]), top=a.probabilities[a.choice];
+    const human=ev&&ev.review_label, ai=aiLabel(a);
+    left='<div><div class="ai-verdict">'+esc(AI_KO[a.choice]||a.choice)+' <span class="num">'+Math.round(top*100)+'%</span>'+(top<0.5?' <span class="tag c">확신 낮음</span>':'')+'</div>'+
+      '<div class="ai-sub">즉시 확인 필요도 <b class="num" style="color:var(--fg)">'+Number(a.needs_review).toFixed(2)+'</b> (0은 나중에 봐도 됨, 1은 지금 확인)</div>'+
+      '<div class="meter"><i style="width:'+Math.round(Math.max(0,Math.min(1,a.needs_review))*100)+'%"></i></div>'+
+      '<div class="ai-sub" style="margin-top:8px">사람 판정: '+(human?'<b style="color:var(--fg)">'+esc(human)+'</b> · AI 구분 '+ai+' · '+(human===ai?'<span class="s-ok">일치</span>':'<span class="s-warn">불일치</span>'):'아직 없음')+'</div></div>';
+    right='<div class="bars">'+keys.map(k=>{ const p=a.probabilities[k], t=k===a.choice;
+      return '<span class="t'+(t?' hi':'')+'">'+esc(AI_KO[k]||k)+'</span><span class="b"><i class="'+(t?'hi':'')+'" style="width:'+(p*100).toFixed(1)+'%"></i></span><span class="num t'+(t?' hi':'')+'">'+(p*100).toFixed(0)+'%</span>'; }).join('')+'</div>';
+  } else {
+    left='<div><div class="ai-verdict '+(r.error?'s-warn':'s-dim')+'">'+esc(aiStatus(r))+'</div>'+(r.error?'<div class="ai-sub">'+esc(r.error)+'. 규칙 경고는 그대로 유지됩니다.</div>':'<div class="ai-sub">받은 답이 없습니다.</div>')+'</div>';
+  }
+  return '<article class="panel ai-rec"><div class="hd"><span class="num">'+esc((r.at||'').slice(11,19))+'</span><b>'+esc(title)+'</b>'+
+    '<span class="tag">'+(MODE_KO[r.mode]||r.mode)+'</span><span>'+esc(aiStatus(r))+'</span><span>모델 '+esc(r.model||'')+'</span>'+
+    (r.latency_ms!=null?'<span class="num">응답 '+(r.latency_ms/1000).toFixed(1)+'초</span>':'')+
+    (r.usage?'<span class="num">입력 '+r.usage.input_tokens+' 토큰</span>':'')+
+    (ev?'<span>사건 '+esc((ev.detected_at||'').slice(11))+' · '+esc(ev.severity||'')+'</span>':'')+
+    (ev&&ev.has_snapshot?'<button class="btn sm" data-snap="'+esc(ev.id)+'">증거 사진</button>':'')+'</div>'+
+    left+right+
+    '<details data-airec="'+esc(r.id)+'"'+(AIV.open.has(r.id)?' open':'')+'><summary>AI에 보낸 정보 보기</summary>'+aiFacts(r.state)+
+    '<pre>'+esc(JSON.stringify(r.state,null,2))+'</pre></details></article>';
+}
+function renderAi(){
+  if(VIEW!=='ai') return;
+  const mode=$('#aiMode').value, choice=$('#aiChoice').value, q=$('#aiQ').value.trim().toLowerCase();
+  const all=AIV.recs, ans=all.filter(r=>r.answer);
+  const recs=all.filter(r=>(!mode||r.mode===mode)&&(!choice||(r.answer&&r.answer.choice===choice))&&
+    (!q||JSON.stringify([r.event&&r.event.camera_id,r.event&&r.event.object_ko,r.event&&r.event.event_type,r.model]).toLowerCase().includes(q)));
+  const count={}; ans.forEach(r=>{ count[r.answer.choice]=(count[r.answer.choice]||0)+1; });
+  const lat=ans.map(r=>r.latency_ms).filter(v=>v!=null).sort((a,b)=>a-b), top=ans.map(r=>r.answer.probabilities[r.answer.choice]);
+  setHTML($('#aiSum'),
+    AIV.state==='offline' ? '<span>분석 서버에 연결되어 있지 않아 기록을 불러올 수 없습니다.</span>'
+    : AIV.state==='error' ? '<span class="s-crit">기록을 불러오지 못했습니다: '+esc(AIV.err)+'</span>'
+    : AIV.state!=='ok' ? '<span>불러오는 중</span>'
+    : '<span><b class="num">'+esc(AIV.day)+'</b> 요청 <b class="num">'+AIV.total+'건</b>'+(AIV.total>all.length?' (최근 '+all.length+'건 표시)':'')+'</span>'+
+      '<span>답 받음 <b class="num">'+ans.length+'</b></span><span>답 없음 <b class="num">'+(all.length-ans.length)+'</b></span>'+
+      (lat.length?'<span>응답 시간 중앙값 <b class="num">'+(lat[Math.floor(lat.length/2)]/1000).toFixed(1)+'초</b></span>':'')+
+      (top.length?'<span>1순위 확률 평균 <b class="num">'+Math.round(top.reduce((x,y)=>x+y,0)/top.length*100)+'%</b></span>':'')+
+      Object.keys(count).sort((x,y)=>count[y]-count[x]).map(k=>'<span>'+esc(AI_KO[k]||k)+' <b class="num">'+count[k]+'</b></span>').join('')+
+      (recs.length!==all.length?'<span>필터 결과 <b class="num">'+recs.length+'건</b></span>':''));
+  setHTML($('#aiList'), recs.length ? recs.map(aiRecord).join('')
+    : '<div class="panel" style="padding:14px;color:var(--muted)">'+(AIV.state==='ok'?(all.length?'필터 조건에 맞는 기록이 없습니다.':'이 날짜에 AI에 보낸 요청이 없습니다. 서버를 --ollama 로 켜거나 CSV 기록 탭에서 "AI 판단 요청"을 누르면 기록이 생깁니다.'):'표시할 기록이 없습니다.')+'</div>');
+}
 function setView(v){
-  VIEW = v==='cam'||v==='csv' ? v : 'dash';
-  try{ history.replaceState(null,'',VIEW==='cam'?'#cameras':VIEW==='csv'?'#csv':'#'); }catch(err){}
+  VIEW = ['cam','csv','ai'].includes(v) ? v : 'dash';
+  try{ history.replaceState(null,'',VIEW==='cam'?'#cameras':VIEW==='csv'?'#csv':VIEW==='ai'?'#ai':'#'); }catch(err){}
   renderAll();
   if(VIEW==='csv'){ $('#csvDay').value=CSVV.day; loadCsv(); }
+  if(VIEW==='ai'){ $('#aiDay').value=AIV.day; loadAi(); }
 }
 
 function liveCamStatus(){
@@ -1039,6 +1170,9 @@ document.addEventListener('click',ev=>{
   const t=ev.target, c=s=>t.closest(s);
   let el;
   if((el=c('[data-ev]'))){ ev.stopPropagation(); return evAction(el.dataset.ev,el.dataset.id); }
+  if((el=c('[data-rv]'))){ ev.stopPropagation(); const base='/api/events/'+encodeURIComponent(el.dataset.id);
+    return post(base+'/review',{label:el.dataset.rv,note:'CSV 기록 탭에서 판정'}).then(()=>post(base+'/ack',{name:'관제요원'})).then(loadCsv)
+      .catch(err=>{ CSVV.aiErr='판정을 저장하지 못했습니다 ('+err.message+').'; renderCsv(); }); }
   if((el=c('[data-snap]'))){ ev.stopPropagation(); return dialog('<h3>증거 사진</h3><img class="snap" src="/api/events/'+encodeURIComponent(el.dataset.snap)+'/snapshot" alt="사건 순간의 화면"><div class="btns"><button class="btn primary" data-dlg="close">닫기</button></div>'); }
   if((el=c('[data-check]'))){ doCheck(+el.dataset.check); return renderAll(); }
   if((el=c('[data-em]'))){ if(el.disabled) return; if(el.dataset.em==='capture'){ capture(); return renderAll(); }
@@ -1075,13 +1209,21 @@ $('#scnSpeed').addEventListener('change',e=>{ S.speed=+e.target.value; });
   b.addEventListener('click',e=>{ e.stopPropagation(); if(e.detail===0&&!S.em) ask(); });
 })();
 
-init(); if(location.hash==='#cameras') VIEW='cam'; if(location.hash==='#csv') VIEW='csv';
+init(); if(location.hash==='#cameras') VIEW='cam'; if(location.hash==='#csv') VIEW='csv'; if(location.hash==='#ai') VIEW='ai';
 $('#csvCam').insertAdjacentHTML('beforeend', CAMS.filter(c=>c.live).map(c=>'<option value="'+c.live+'">'+c.id+' '+c.name+'</option>').join(''));
 $('#csvDay').value=CSVV.day;
 $('#csvDay').addEventListener('change',e=>{ CSVV.day=e.target.value||today(); e.target.value=CSVV.day; CSVV.state='idle'; CSVV.rows=[]; renderCsv(); loadCsv(); });
-['csvCam','csvSev'].forEach(id=>$('#'+id).addEventListener('change',renderCsv));
+['csvCam','csvSev','csvRv'].forEach(id=>$('#'+id).addEventListener('change',renderCsv));
 $('#csvQ').addEventListener('input',renderCsv);
 $('#csvReload').addEventListener('click',loadCsv);
+$('#aiChoice').insertAdjacentHTML('beforeend', Object.keys(AI_KO).map(k=>'<option value="'+k+'">'+AI_KO[k]+'</option>').join(''));
+$('#aiDay').value=AIV.day;
+$('#aiDay').addEventListener('change',e=>{ AIV.day=e.target.value||today(); e.target.value=AIV.day; AIV.state='idle'; AIV.recs=[]; renderAi(); loadAi(); });
+['aiMode','aiChoice'].forEach(id=>$('#'+id).addEventListener('change',renderAi));
+$('#aiQ').addEventListener('input',renderAi);
+$('#aiAll').addEventListener('change',loadAi);
+$('#aiReload').addEventListener('click',loadAi);
+$('#aiList').addEventListener('toggle',e=>{ const id=e.target.dataset&&e.target.dataset.airec; if(!id) return; if(e.target.open) AIV.open.add(id); else AIV.open.delete(id); },true);
 $('#logout').addEventListener('click',()=>{ fetch('/api/logout',{method:'POST'}).then(toLogin,toLogin); });
 $('#csvAi').addEventListener('click',()=>{
   CSVV.aiErr='';
@@ -1090,11 +1232,12 @@ $('#csvAi').addEventListener('click',()=>{
     .then(res=>{ if(!res.ok) CSVV.aiErr='요청하지 못했습니다: '+(res.d.detail||'서버 오류'); else if(!res.d.total) CSVV.aiErr='판단할 미확인 사건이 없습니다.'; renderCsv(); })
     .catch(()=>{ CSVV.aiErr='요청하지 못했습니다. 서버 실행 상태를 확인하세요.'; renderCsv(); });
 });
-renderAll(); connect(); if(VIEW==='csv') renderCsv();
+renderAll(); connect(); if(VIEW==='csv') renderCsv(); if(VIEW==='ai') renderAi();
 let last=performance.now(), acc=0;
 setInterval(()=>{ const n=performance.now(), dt=Math.min(1,(n-last)/1000); last=n; if(!S.playing) return; tick(dt*S.speed); acc+=dt;
   renderTop(); liveVitals(); renderMap(); renderCams(); renderCamView(); liveCamStatus(); liveCountdown(); renderEm();
   if(acc>=1){ acc=0; if(VIEW==='csv') renderCsv();
+    if(VIEW==='ai'&&(AIV.state==='idle'||AIV.state==='offline'||(++AIV.tick%10===0&&AIV.day===today()))) loadAi();
     if(VIEW==='csv'&&(CSVV.state==='idle'||CSVV.state==='offline'||(++CSVV.tick%5===0&&CSVV.day===today()))) loadCsv();
     renderAnimals(); liveVitals(); renderFeed(); renderTimeline(); renderRadio(); }
 },250);
