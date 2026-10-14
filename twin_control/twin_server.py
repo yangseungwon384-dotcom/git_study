@@ -65,7 +65,7 @@ ENGINE_DIR = HERE.parent / 'zoo_safe'
 PAGE = HERE / 'twin_control.html'
 PAGE_HEAD = ('<!doctype html><html lang="ko"><head><meta charset="utf-8">'
              '<meta name="viewport" content="width=device-width,initial-scale=1"></head><body>')
-FRAME_SEC = 0.2    # 화면용 영상 갱신 주기
+FRAME_SEC = 1 / 18    # 화면용 영상 갱신 주기. 그린 시간이 길면 추가로 기다리지 않는다.
 STATE_SEC = 0.5    # 상태 전송 주기
 EVENT_LIMIT = 60   # 화면에 넘기는 오늘 사건 수 (최근 것부터)
 EVENT_ID = re.compile(r'^[0-9a-f]{32}$')
@@ -228,6 +228,8 @@ class Guard:
 def build_engine(own, rest):
     sys.path.insert(0, str(ENGINE_DIR))
     import zoo_vision_jev_new as zj
+    import dashboard_store
+    dashboard_store.bind(zj.Database)
     saved = sys.argv
     sys.argv = [saved[0], '--data-dir', str(own.data_dir), *rest]
     try:
@@ -237,7 +239,16 @@ def build_engine(own, rest):
     original = zj.load_original(args.source_dir)
     # 카메라 목록과 탐지 후처리는 twin_vision에 있다. 원본 zoo_vision.py는 실행 중에만 바꿔 끼운다.
     original.CAMERAS[:] = twin_vision.engine_cameras(original, args.source_dir)
-    return zj, twin_vision.make_analyzer(zj)(original, args), args
+    for cam in original.CAMERAS:
+        print(f"  {cam['title']}: {'OK' if cam['file'].is_file() else 'MISSING'} {cam['file']}")
+    engine = twin_vision.make_analyzer(zj)(original, args)
+    engine.db.migrate()
+    with engine.db.connect() as db:
+        db.execute('DELETE FROM roi')
+    for runtime in engine.runtime.values():
+        runtime['cfg'] = None
+        runtime['roi_version'] = 0
+    return zj, engine, args
 
 
 def create_app(zj, engine, args, accounts):
@@ -367,18 +378,25 @@ def create_app(zj, engine, args, accounts):
         """step_all이 그린 화면을 JPEG로 바꿔 둔다. 영상 요청은 이 사본만 읽는다."""
         import cv2
         ids = list(engine.runtime)
+        last_seq = {}
         while not stop.is_set():
+            began = time.monotonic()
             try:
-                for cid, image in zip(ids, engine.step_all()):
+                for cid, item in zip(ids, engine.step_all(last_seq)):
+                    if item is None:
+                        continue
+                    seq, image = item
                     if image is None:
                         continue
-                    ok, buf = cv2.imencode('.jpg', cv2.cvtColor(image, cv2.COLOR_RGB2BGR),
-                                           [cv2.IMWRITE_JPEG_QUALITY, 75])
+                    ok, buf = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 50])
                     if ok:
                         frames[cid] = buf.tobytes()
+                        last_seq[cid] = seq
             except Exception as exc:
                 print('[frame]', type(exc).__name__, exc)
-            stop.wait(FRAME_SEC)
+            leftover = FRAME_SEC - (time.monotonic() - began)
+            if leftover > 0:
+                stop.wait(leftover)
 
     def event_view(row, ai=None):
         path = row.get('snapshot_path')
@@ -400,8 +418,9 @@ def create_app(zj, engine, args, accounts):
         with engine.lock:
             for cid, r in engine.runtime.items():
                 rendered, cfg = r['rendered'], r['cfg']
+                sticky = bool(rendered and rendered[2] and any(d.get('danger') for d in rendered[2]))
                 fresh = bool(rendered and rendered[1] == r['session']
-                             and time.monotonic() - rendered[0] <= args.max_gap)
+                             and (time.monotonic() - rendered[0] <= args.max_gap or sticky))
                 cameras.append(dict(
                     id=cid, title=r['cam']['title'], connected=r['frame'] is not None,
                     error=r['error'], fps=round(r['analysis_fps'], 1),

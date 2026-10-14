@@ -6,7 +6,11 @@ setlocal
 rem 두 번 눌러 실행한다. 이 PC에서만 열리는 관제 서버를 켜고 브라우저를 연다.
 rem 다른 PC에서도 접속하게 하려면 run_twin_control_network.bat 을 쓴다.
 
-set "PY=C:\code\code_test\zoo\.venv\Scripts\python.exe"
+if exist "C:\code\code_test\zoo\.venv\Scripts\python.exe" (
+  set "PY=C:\code\code_test\zoo\.venv\Scripts\python.exe"
+) else (
+  set "PY=C:\Users\ysw77\anaconda3\envs\safety\python.exe"
+)
 set "URL=http://127.0.0.1:8765"
 
 if not exist "%PY%" (
@@ -27,7 +31,7 @@ echo 10초쯤 뒤에 브라우저가 열립니다: %URL%
 echo.
 if not defined TWIN_NO_BROWSER start "" /min cmd /c "timeout /t 10 /nobreak >nul & start "" %URL%"
 
-"%PY%" "%~dp0twin_server.py" --ollama %*
+"%PY%" "%~dp0twin_server.py" --source-dir "C:\code\git_study" --weights "C:\code\yolo26n.pt" %*
 
 echo.
 echo 서버가 꺼졌습니다. 위에 오류가 있으면 확인하세요.

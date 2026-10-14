@@ -6,3 +6,5 @@ zoo_safe/zoo_jev_data/
 zoo_safe/zoo_jev_data_new/
 logs/
 snapshots/
+team_*.mp4
+twin_control/twin_data/

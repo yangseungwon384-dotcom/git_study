@@ -6,7 +6,11 @@ setlocal
 rem 같은 네트워크의 다른 PC에서도 접속할 수 있게 서버를 켠다. 로그인 계정이 있어야 한다.
 rem 계정이 없으면 관리자 계정부터 만든다. 비밀번호는 이 창에서 직접 입력한다.
 
-set "PY=C:\code\code_test\zoo\.venv\Scripts\python.exe"
+if exist "C:\code\code_test\zoo\.venv\Scripts\python.exe" (
+  set "PY=C:\code\code_test\zoo\.venv\Scripts\python.exe"
+) else (
+  set "PY=C:\Users\ysw77\anaconda3\envs\safety\python.exe"
+)
 set "SERVER=%~dp0twin_server.py"
 
 if not exist "%PY%" (
@@ -30,7 +34,7 @@ echo 관제 서버를 시작합니다. 이 창을 닫으면 서버도 꺼집니�
 echo Windows 방화벽이 물으면 "개인 네트워크"만 허용하세요.
 echo.
 
-"%PY%" "%SERVER%" --host 0.0.0.0 --ollama %*
+"%PY%" "%SERVER%" --host 0.0.0.0 --source-dir "C:\code\git_study" --weights "C:\code\yolo26n.pt" %*
 
 echo.
 echo 서버가 꺼졌습니다. 위에 오류가 있으면 확인하세요.
