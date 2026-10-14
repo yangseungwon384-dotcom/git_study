@@ -54,8 +54,8 @@ HTTPS는 없다. 내부망에서만 쓰고 인터넷에 직접 열지 않는다.
 ## AI 판단 채점
 
 ```powershell
-python twin_control	win_eval.py          # 저장된 AI 답으로 채점
-python twin_control	win_eval.py --ask    # 판정된 사건을 TEV에 다시 묻고 채점 (Ollama 필요)
+python twin_control\twin_eval.py          # 저장된 AI 답으로 채점
+python twin_control\twin_eval.py --ask    # 판정된 사건을 TEV에 다시 묻고 채점 (Ollama 필요)
 ```
 
 사람 판정과 AI 판단의 표, 일치율, 실제 위험을 AI가 오탐으로 본 건수, 자동 확인 조건을 적용했을 때의 결과를 낸다. TEV에 보내는 요약을 바꾸려면 `twin_ai.py`의 `review_state`를 고치고 다시 채점한다.
