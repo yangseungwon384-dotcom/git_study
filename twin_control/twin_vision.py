@@ -494,6 +494,29 @@ def left_safe(samples, stamp):
     return round(stamp - samples[last_safe + 1][0], 2)
 
 
+def geometry_evidence(engine, cid, d, s, cfg, stamp):
+    """AI에 보내는 위치 단서 (R8). 거리와 크기는 화면 크기로 나눈 비율이라 카메라 해상도와 무관하다."""
+    import cv2
+    frame = engine.runtime[cid]['frame']
+    h, w = frame.shape[:2]
+    x1, y1, x2, y2 = d['bbox']
+    out = dict(box_width_ratio=round((x2 - x1) / w, 3), box_height_ratio=round((y2 - y1) / h, 3),
+               detector_confidence_now=round(float(d['confidence']), 3))
+    poly = engine.pixel_polygon(cfg, w, h)
+    if poly is not None and d.get('anchor'):
+        fx, fy = d['anchor'][0] * (w - 1), d['anchor'][1] * (h - 1)
+        signed = float(cv2.pointPolygonTest(poly, (float(fx), float(fy)), True))
+        # 양수 = 구역 밖으로 나간 거리, 음수 = 구역 안쪽 깊이. 화면 짧은 변 대비.
+        out['foot_outside_distance_ratio'] = round(-signed / min(w, h), 3)
+    samples = s['watch'].samples if s.get('watch') else []
+    if samples:
+        out['track_observed_sec'] = round(stamp - samples[0][0], 2)
+        out['outside_samples'] = sum(1 for x in samples if x[2] == 'risk')
+    since = left_safe(samples, stamp)
+    out['sec_since_last_seen_inside'] = since          # 안에서 본 적이 없으면 null
+    return out
+
+
 def make_analyzer(zj):
     """엔진의 LinkedAnalyzer에서 모델과 화면 그리기만 바꾼 분석기."""
 
@@ -545,6 +568,15 @@ def make_analyzer(zj):
                     handle.write(json.dumps(row, ensure_ascii=False) + chr(10))
             except Exception as exc:
                 print('[exit-log]', type(exc).__name__, exc)
+
+        def build_state(self, cid, d, s, cfg, observed_at, video_sec, person_present, stamp):
+            """R8 I3: 엔진의 사건 요약에 위치·크기·지속 시간을 덧붙인다. 판정에는 쓰지 않고 AI 입력에만 들어간다."""
+            state = super().build_state(cid, d, s, cfg, observed_at, video_sec, person_present, stamp)
+            try:
+                state['evidence']['geometry'] = geometry_evidence(self, cid, d, s, cfg, stamp)
+            except Exception as exc:   # 덧붙이기에 실패해도 원래 요약은 그대로 보낸다
+                print('[ai-geometry]', type(exc).__name__, exc)
+            return state
 
         def detector(self):
             if self.model is None:
