@@ -24,6 +24,8 @@ import twin_vision  # noqa: E402
 SOURCE = Path(r'C:\code\code_test\zoo')
 ANALYSIS_FPS = 3.0
 CACHE = HERE / 'replay_cache'
+# 'v1'(이전 규칙)으로 돌릴 때 빼는 카메라별 설정. 엔진 기본 규칙과 같아진다.
+RULE_KEYS = ('person_min', 'person_gate', 'person_anchor', 'exit_samples', 'exit_sec', 'boundary_norm')
 
 
 def detections(cam, weights, width=960):
@@ -75,7 +77,7 @@ def zone(cam_id, data_dir, shrink):
     return cfg
 
 
-def replay(cam, data, cfg, rules, loops):
+def replay(cam, data, cfg, rules, loops, start=0.0):
     """rules: 'v1' (이전 규칙) 또는 'v2' (twin_vision의 카메라별 규칙). 알림 목록을 돌려준다."""
     import cv2
     import numpy as np
@@ -85,39 +87,48 @@ def replay(cam, data, cfg, rules, loops):
     gate = twin_vision.camera_gate(cam['cam_id'], 'elephant', base_gate) if rules == 'v2' else base_gate
     watch_class = twin_vision.object_watch_class() if rules == 'v2' else ObjectWatch
     margin_px = 8          # zoo_safety.BOTTOM_MARGIN
+    rule_cam = cam if rules == 'v2' else {k: v for k, v in cam.items() if k not in RULE_KEYS}
     events, static = [], twin_vision.StaticFilter()
     duration = data['duration']
     for loop in range(loops):
         tracker, watches, last = zj.IoUTracker(), {}, {}
         for frame_index, frame in enumerate(data['frames']):
+            if frame['t'] < start:
+                continue
             t = loop * duration + frame['t']
             w, h = frame['size']
             poly = (np.asarray(cfg['polygon'], np.float32) * [w - 1, h - 1]).astype(np.int32)
             raw = [tuple(r) for r in frame['raw']]
-            kept, _ = twin_vision.post_process(cam, raw, static, t)
+            kept, _ = twin_vision.post_process(rule_cam, raw, static, t)
             dets = tracker.update([dict(name=n, confidence=c, bbox=[int(v) for v in b]) for n, c, b in kept])
             for d in dets:
                 name, tid = d['name'], d['track_id']
-                g = gate if name != 'person' else base_gate
-                fx, fy = (d['bbox'][0] + d['bbox'][2]) / 2, min(float(d['bbox'][3]), h - 1)
+                if name == 'person':
+                    g = twin_vision.camera_gate(cam['cam_id'], name, base_gate) if rules == 'v2' else base_gate
+                else:
+                    g = gate
+                fx, fy = twin_vision.anchor_point(rule_cam, name, d['bbox'], h)
                 signed = float(cv2.pointPolygonTest(poly, (fx, fy), True))
                 relation = zone_relation(signed, g.boundary_norm * min(w, h), fy >= h - margin_px, False)
                 s = watches.get(tid)
                 if s and (t - last[tid] > g.max_gap_sec or s['name'] != name):
                     s = None
                 if s is None:
-                    s = watches[tid] = dict(name=name, watch=watch_class(), samples=[])
+                    s = watches[tid] = dict(name=name, watch=watch_class(), samples=[], crossed=None)
                 last[tid] = t
                 if rules == 'v2':
                     watch_class.camera = cam['cam_id']
                 out = s['watch'].update(t, (loop, frame_index), d['confidence'], relation, g, bool(cfg.get('person_inside')), name)
+                if s['crossed'] is None and ((name == 'person') == (signed > 0)):
+                    s['crossed'] = t     # 발 위치가 처음으로 선을 넘은 관측 (사람은 안으로, 동물은 밖으로)
                 s['samples'].append(dict(t=round(t, 2), conf=round(d['confidence'], 2), relation=relation, dist=round(signed, 1)))
                 del s['samples'][:-8]
                 if out['action'] == 'open':
                     events.append(dict(loop=loop, t=round(t, 2), video_sec=round(frame['t'], 2), track=tid, object=name,
                                        kind=out['kind'], confidence=round(d['confidence'], 3), relation=relation,
                                        distance_px=round(signed, 1), margin_px=round(g.boundary_norm * min(w, h), 1),
-                                       bbox=d['bbox'], foot=[round(fx), round(fy)], recent=list(s['samples'])))
+                                       bbox=d['bbox'], foot=[round(fx), round(fy)], recent=list(s['samples']),
+                                       delay=round(t - s['crossed'], 2) if s['crossed'] is not None else None))
     return events
 
 
@@ -125,7 +136,7 @@ def summary(events, label, loops, duration):
     animal = [e for e in events if e['object'] != 'person']
     person = [e for e in events if e['object'] == 'person']
     print(f'[{label}] {loops}회 반복 ({loops * duration:.0f}초): 동물 이탈 알림 {len(animal)}건, 사람 진입 알림 {len(person)}건')
-    return animal
+    return animal + person
 
 
 def main():
@@ -136,21 +147,25 @@ def main():
     parser.add_argument('--loops', type=int, default=3)
     parser.add_argument('--shrink', type=float, default=1.0, help='구역 크기 배율. 1보다 작으면 실제 이탈 장면을 만든다')
     parser.add_argument('--events', type=Path, help='알림별 근거를 저장할 jsonl')
+    parser.add_argument('--start', type=float, default=0.0, help='영상의 이 초부터 분석한다 (사람이 이미 구역 안에서 처음 잡히는 상황 만들기)')
+    parser.add_argument('--person-anchor', choices=('foot', 'center'), help='v2 규칙에서 사람 판정 기준점을 바꿔 시험')
     parser.add_argument('--margin', type=float, help='v2 규칙의 경계 완충 폭을 이 값(화면 짧은 변 대비 비율)으로 바꿔 시험')
     args = parser.parse_args()
     cam = twin_vision.BY_ID[args.camera]
+    if args.person_anchor:
+        cam['person_anchor'] = args.person_anchor
     if args.margin is not None:
         cam['boundary_norm'] = args.margin
     data = detections(cam, args.weights)
     cfg = zone(args.camera, args.data_dir, args.shrink)
-    print(f"{cam['title']}: 분석 프레임 {len(data['frames'])}장 / 영상 {data['duration']:.1f}초, 구역 배율 {args.shrink}")
+    print(f"[시작 {args.start}초] {cam['title']}: 분석 프레임 {len(data['frames'])}장 / 영상 {data['duration']:.1f}초, 구역 배율 {args.shrink}")
     results = {}
     for rules in ('v1', 'v2'):
-        results[rules] = replay(cam, data, cfg, rules, args.loops)
+        results[rules] = replay(cam, data, cfg, rules, args.loops, args.start)
         animal = summary(results[rules], rules, args.loops, data['duration'])
         for e in animal:
             tail = ' '.join(f"{x['relation'][:3]}{x['conf']:.2f}" for x in e['recent'][-5:])
-            print(f"   {e['video_sec']:5.1f}s #{e['track']:<3} {e['kind']:<10} 신뢰도 {e['confidence']:.2f} 경계까지 {e['distance_px']:6.1f}px (완충 {e['margin_px']}px) 최근: {tail}")
+            print(f"   {e['object']:<8} {e['video_sec']:5.1f}s #{e['track']:<3} {e['kind']:<10} 넘은 뒤 {e['delay']}초 신뢰도 {e['confidence']:.2f} 경계까지 {e['distance_px']:6.1f}px (완충 {e['margin_px']}px) 최근: {tail}")
     if args.events:
         with open(args.events, 'w', encoding='utf-8') as handle:
             for rules, events in results.items():

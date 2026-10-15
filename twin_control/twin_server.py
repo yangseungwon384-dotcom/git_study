@@ -75,6 +75,9 @@ STATE_SEC = 0.5    # 상태 전송 주기
 EVENT_LIMIT = 60   # 화면에 넘기는 오늘 사건 수 (최근 것부터)
 EVENT_ID = re.compile(r'^[0-9a-f]{32}$')
 REVIEW_LABELS = ('실제 위험', '오탐', '판단 보류')
+# R2 (2026-10-15): 사람 진입 알림 문장에서 '(진입 확정 아님)'을 뺀다. 이미 저장된 사건도 보여 줄 때 뺀다.
+PERSON_ALERT_MSG = '안전구역 안에서 사람이 관측되었습니다. 담당자 확인이 필요합니다.'
+HIDDEN_PHRASE = ' (진입 확정 아님)'
 DAY = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 DECISION_LIMIT = 300     # 판단 AI 탭에 한 번에 보내는 기록 수 (최근 것부터)
 USER_NAME = re.compile(r'^[A-Za-z0-9가-힣_.-]{2,32}$')
@@ -270,6 +273,7 @@ def build_engine(own, rest):
     finally:
         sys.argv = saved
     original = zj.load_original(args.source_dir)
+    zj.PERSON_ALERT_MSG = PERSON_ALERT_MSG      # 엔진이 새 사람 진입 사건과 화면 띠에 쓰는 문장
     # 카메라 목록과 탐지 후처리는 twin_vision에 있다. 원본 zoo_vision.py는 실행 중에만 바꿔 끼운다.
     original.CAMERAS[:] = twin_vision.engine_cameras(original, args.source_dir)
     return zj, twin_vision.make_analyzer(zj)(original, args), args
@@ -390,7 +394,7 @@ def create_app(zj, engine, args, accounts):
             track_id=row.get('track_id'), object=row.get('object'),
             object_ko=twin_vision.label_of(zj.CLASS_KO.get(row.get('object'), row.get('object'))),
             event_type=row.get('event_type'), severity=row.get('severity'),
-            message=row.get('message'), confidence=row.get('confidence'),
+            message=clean_message(row.get('message')), confidence=row.get('confidence'),
             active=row['active'], ended_at=row['ended_at'],
             end_reason_ko=END_REASON_KO.get(row['end_reason'], row['end_reason']),
             acknowledged_at=row['acknowledged_at'], ack_name=row['ack_name'],
@@ -639,7 +643,7 @@ def create_app(zj, engine, args, accounts):
         for row in rows:
             ai = answers.get(row['id'])
             ai = ai if ai and ai['state'] == 'answered' else {}
-            writer.writerow([cell(int(row['active']) if name == 'active' else row.get(name)) for name in CSV_FIELDS]
+            writer.writerow([cell(int(row['active']) if name == 'active' else clean_message(row.get(name)) if name == 'message' else row.get(name)) for name in CSV_FIELDS]
                             + [cell(ai.get(key)) for key in ('choice', 'probability', 'needs_review', 'model', 'mode')])
         return Response(('\ufeff' + out.getvalue()).encode('utf-8'), media_type='text/csv; charset=utf-8',
                         headers={'Content-Disposition': f'attachment; filename="zoo_events_{day}.csv"',
@@ -780,6 +784,10 @@ def create_app(zj, engine, args, accounts):
         return roi_view(camera_id)
 
     return app
+
+
+def clean_message(text):
+    return text.replace(HIDDEN_PHRASE, '') if isinstance(text, str) else text
 
 
 def main():

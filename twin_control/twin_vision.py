@@ -52,7 +52,13 @@ CAMERAS = (
     dict(cam_id='ZOO_CAM_REDPANDA_01', code='CAMERA 04', title='레서판다 관람 구역', desc='관람객·동물 접근 감시',
          file='redpanda_cctv.mp4', species='red_panda', label='레서판다 추정',
          classes=('dog', 'cat', 'bear', 'cow', 'sheep', 'teddy bear'),
-         min_conf=0.25, proxy=True, static_filter=False),
+         min_conf=0.25, proxy=True, static_filter=False,
+         # R2 (2026-10-15): 레서판다가 사람으로 잡힌 박스는 신뢰도가 최대 0.62였다. 사람 기준을 0.65로 올린다.
+         person_min=0.65,
+         # 사람 침입은 빨리 알린다: 경계 띠 0.5%(2.4px), 확인 시간 0.5초 (엔진 기본 2%, 1초)
+         person_gate=dict(boundary_norm=0.005, min_span_sec=0.5),
+         # 고객 요청 (R2 후보 검토 중 추가): 사람은 박스 가운데로 판정한다. 울타리를 넘는 순간을 발보다 먼저 잡는다.
+         person_anchor='center'),
 )
 BY_ID = {cam['cam_id']: cam for cam in CAMERAS}
 LABELS = dict({cam['species']: cam['label'] for cam in CAMERAS}, person='사람')
@@ -60,9 +66,14 @@ ZONE_KO = {'SAFE': '안전', 'DANGER': '위험', 'BOUNDARY': '경계'}
 
 
 def camera_gate(cam_id, name, gate):
-    """카메라별 경계 완충 폭. 사람에게는 쓰지 않는다. 값이 없으면 엔진 기본값 그대로."""
+    """카메라별 판정 기준. 동물은 boundary_norm(경계 완충 폭), 사람은 person_gate(완충 폭, 확인 시간 등).
+    값이 없으면 엔진 기본값 그대로."""
     cam = BY_ID.get(cam_id)
-    if not cam or name == PERSON or cam.get('boundary_norm') is None:
+    if not cam:
+        return gate
+    if name == PERSON:
+        return replace(gate, **cam['person_gate']) if cam.get('person_gate') else gate
+    if cam.get('boundary_norm') is None:
         return gate
     return replace(gate, boundary_norm=cam['boundary_norm'])
 
@@ -109,6 +120,16 @@ def object_watch_class():
 
     _WATCH['cls'] = TwinObjectWatch
     return TwinObjectWatch
+
+
+def anchor_point(cam, name, bbox, h):
+    """구역 판정에 쓰는 점. 기본은 발 위치(박스 아래쪽 가운데). 카메라에 person_anchor='center'가 있으면
+    사람만 박스 가운데를 쓴다 (울타리를 넘어 들어오는 사람을 발보다 먼저 잡기 위해)."""
+    x1, y1, x2, y2 = bbox
+    # 화면 아래 끝에 잘린 박스는 앞쪽(울타리 밖) 관람객이라 가운데가 위로 올라와 보인다: 발 위치로 판정한다
+    if name == PERSON and (cam or {}).get('person_anchor') == 'center' and y2 < h - 3:
+        return (x1 + x2) / 2, (y1 + y2) / 2
+    return (x1 + x2) / 2, min(float(y2), h - 1)
 
 
 def label_of(name):
@@ -166,7 +187,7 @@ def post_process(cam, raw, static, mono):
     merged = []
     for name, confidence, bbox in raw:
         if name == PERSON:
-            if confidence >= PERSON_MIN:
+            if confidence >= cam.get('person_min', PERSON_MIN):
                 merged.append((PERSON, confidence, bbox))
         elif name in cam['classes']:
             merged.append((cam['species'], confidence, bbox))
@@ -362,7 +383,36 @@ def make_analyzer(zj):
 
         def detect(self, r, frame, session, cfg):
             self.detector().camera = r['cam']['cam_id']
-            return super().detect(r, frame, session, cfg)
+            detections = super().detect(r, frame, session, cfg)
+            return self.rejudge_people(r, frame, cfg, detections)
+
+        def rejudge_people(self, r, frame, cfg, detections):
+            """person_anchor='center'인 카메라는 사람의 구역 판정을 박스 가운데로 다시 한다.
+            엔진은 발 위치로 판정한 결과를 돌려주므로, 같은 규칙(zone_relation, classify_subject)으로 덮어쓴다."""
+            cam = BY_ID.get(r['cam']['cam_id'])
+            if not cam or cam.get('person_anchor') != 'center' or not cfg or not cfg.get('enabled'):
+                return detections
+            import cv2
+            from dashboard_policy import zone_relation
+            h, w = frame.shape[:2]
+            poly = self.pixel_polygon(cfg, w, h)
+            if poly is None:
+                return detections
+            gate = self.gate_for(cam['cam_id'], PERSON)
+            for d in detections:
+                if d['name'] != PERSON:
+                    continue
+                fx, fy = anchor_point(cam, PERSON, d['bbox'], h)
+                signed = float(cv2.pointPolygonTest(poly, (float(fx), float(fy)), True))
+                relation = zone_relation(signed, gate.boundary_norm * min(w, h), False, False)
+                zone, inside, danger = zj.classify_subject(
+                    PERSON, signed >= 0, False, enabled=True, alert_on_exit=bool(r['cam'].get('alert_on_exit')),
+                    person_inside=bool(cfg.get('person_inside')))
+                if relation == 'boundary':
+                    zone, danger = 'BOUNDARY', False
+                d.update(anchor=(fx / max(w - 1, 1), fy / max(h - 1, 1)), inside=inside, relation=relation,
+                         zone=zone, danger=danger)
+            return detections
 
         def step_all(self):
             return render_all(self, zj.BOX_NOTE_SEC)
