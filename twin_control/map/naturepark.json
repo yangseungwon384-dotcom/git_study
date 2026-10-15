@@ -1,0 +1,41 @@
+{
+  "name": "Nature Park 안내도 기준 3D 맵",
+  "source": {
+    "file": "naturepark_map_260413.pdf",
+    "texture": "naturepark_map.png",
+    "width": 1684,
+    "height": 1303,
+    "units": "안내도 이미지의 가로·세로 퍼센트 (0~100). 안내도에는 축척과 실제 좌표가 없다.",
+    "metres_per_unit": null,
+    "note": "좌표는 안내도 그림 위에서 눈으로 맞춘 값이다. 실측 도면이나 GPS 기준점 3~4개가 생기면 이 파일만 고치면 된다."
+  },
+  "zones": [
+    {"id": "forest", "name": "초식동물의 숲", "polygon": [[70, 31], [86, 30], [91, 40], [89, 48], [80, 49], [71, 46]], "fence": 0.6},
+    {"id": "safari", "name": "워킹 사파리", "polygon": [[79, 58], [90, 57], [92, 69], [86, 71], [79, 70]], "fence": 0.9},
+    {"id": "farm", "name": "애니멀팜", "polygon": [[60, 69], [76, 68], [77, 76], [62, 77]], "fence": 0.5},
+    {"id": "hill", "name": "바람의 언덕", "polygon": [[33, 41], [42, 40], [41, 46], [33, 46.5]], "fence": 0.4},
+    {"id": "plaza", "name": "입구 광장", "polygon": [[8, 79], [21, 79], [21, 88], [8, 88]], "fence": 0},
+    {"id": "kayak", "name": "카약 탑승장", "polygon": [[48, 44], [61, 44], [61, 49], [48, 50]], "fence": 0.3}
+  ],
+  "buildings": [
+    {"name": "호텔드포레", "rect": [33.5, 22.5, 39, 28], "height": 3.0},
+    {"name": "트리하우스", "rect": [44, 34, 47, 38], "height": 2.0},
+    {"name": "무지개썰매장", "rect": [27, 37, 33, 40.5], "height": 1.5},
+    {"name": "실내 동물원", "rect": [17, 76, 22, 81], "height": 2.0},
+    {"name": "파충류관", "rect": [21.5, 73.5, 25, 78], "height": 1.6},
+    {"name": "카페 네이처마켓", "rect": [24.5, 69.5, 29, 72.5], "height": 1.6},
+    {"name": "한식당 영락", "rect": [62, 62, 66, 67], "height": 2.2},
+    {"name": "카페소나무정원", "rect": [73.5, 68, 76.5, 71], "height": 1.4},
+    {"name": "매표소", "rect": [12.5, 80, 15.5, 83.5], "height": 1.2},
+    {"name": "풀제이드 바위", "rect": [50, 37.5, 61, 43.5], "height": 2.5, "kind": "rock"}
+  ],
+  "cameras": [
+    {"id": "CAM-01", "live": "ZOO_CAM_ELEPHANT_01", "name": "코끼리 방사장", "zone": "forest", "pos": [72, 47], "target": [80, 39], "height": 2.5, "placement": "임시 배치 (안내도에 코끼리 방사장 없음)"},
+    {"id": "CAM-02", "live": "ZOO_CAM_GIRAFFE_01", "name": "기린 관람 구역", "zone": "farm", "pos": [62, 77], "target": [69, 72], "height": 2.5, "placement": "임시 배치 (안내도에 기린 방사장 없음)"},
+    {"id": "CAM-07", "live": "ZOO_CAM_TIGER_01", "name": "워킹 사파리 (호랑이)", "zone": "safari", "pos": [80, 70], "target": [85, 63], "height": 2.5, "placement": "안내도와 일치 (워킹 사파리: 사자, 호랑이)"},
+    {"id": "CAM-05", "live": "ZOO_CAM_REDPANDA_01", "name": "레서판다 관람 구역", "zone": "farm", "pos": [76, 68], "target": [69, 72], "height": 2.5, "placement": "임시 배치 (안내도에 레서판다 없음)"},
+    {"id": "CAM-03", "name": "입구 광장", "zone": "plaza", "pos": [21, 79], "target": [14, 84], "height": 2.5, "placement": "모의 카메라"},
+    {"id": "CAM-12", "name": "카약 탑승장", "zone": "kayak", "pos": [48, 50], "target": [54, 47], "height": 2.5, "placement": "모의 카메라"},
+    {"id": "CAM-04", "name": "바람의 언덕", "zone": "hill", "pos": [42, 45], "target": [37, 42], "height": 2.5, "placement": "모의 카메라"}
+  ]
+}

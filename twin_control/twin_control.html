@@ -98,6 +98,13 @@ body.em .grid{grid-template-columns:260px minmax(0,1fr) 350px}
 .mk.sel circle.ring{stroke:var(--fg);stroke-width:3}
 .mk.alarm circle.ring{animation:pulse 1s infinite}
 @keyframes pulse{50%{opacity:.25}}
+.viewsw{display:inline-flex;gap:4px;margin-left:8px;vertical-align:middle}
+.viewsw button{background:transparent;border:1px solid var(--line-2);border-radius:6px;padding:1px 10px;color:var(--muted);font-size:12px}
+.viewsw button[aria-pressed="true"]{background:var(--accent-bg);border-color:var(--accent);color:var(--fg)}
+#map3d{display:block;width:100%;border-radius:6px;background:#0c1626;touch-action:none;cursor:grab}
+.m3msg{font-size:12px;color:var(--muted);padding:4px 2px}
+.m3perf{position:absolute;left:8px;bottom:6px;font-size:11px;color:var(--muted);background:rgba(10,17,30,.75);padding:2px 6px;border-radius:4px}
+.m3help{position:absolute;right:8px;bottom:6px;font-size:11px;color:var(--muted);background:rgba(10,17,30,.75);padding:2px 6px;border-radius:4px}
 @media (prefers-reduced-motion:reduce){.mk.alarm circle.ring{animation:none}.cover.holding i{transition:none}}
 .legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:11.5px;color:var(--muted)}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
@@ -339,11 +346,23 @@ a.btn[aria-disabled="true"]{opacity:.45;pointer-events:none}
     </aside>
 
     <section class="panel map">
-      <h2>GIS 트윈 맵 <small>2D 도면 (3D 지형은 2단계)</small></h2>
+      <h2>GIS 트윈 맵 <small>2D 모의 도면 · 3D는 안내도 기준</small>
+        <span class="viewsw" role="group" aria-label="지도 보기"><button data-mapview="2d" aria-pressed="true">2D</button><button data-mapview="3d" aria-pressed="false">3D</button></span></h2>
       <div class="body">
         <div class="layers" id="layers"></div>
-        <div class="mapwrap"><svg id="map" viewBox="0 0 1000 600" role="img" aria-label="동물원 구역 지도"></svg></div>
-        <div class="legend">
+        <div class="m3msg" id="m3msg" hidden></div>
+        <div class="mapwrap" id="map2dWrap"><svg id="map" viewBox="0 0 1000 600" role="img" aria-label="동물원 구역 지도"></svg></div>
+        <div class="mapwrap" id="map3dWrap" hidden><canvas id="map3d" role="img" aria-label="안내도 기준 3D 동물원 지도"></canvas>
+          <span class="m3perf" id="m3perf"></span><span class="m3help">끌기: 회전 · Shift+끌기: 이동 · 휠: 확대 · 두 번 클릭: 처음 시점</span></div>
+        <div class="legend" id="legend3d" hidden>
+          <span><i style="background:var(--crit)"></i>실제 분석 사건 (붉은 기둥)</span>
+          <span><i class="sq" style="background:var(--warn)"></i>모의 사건 (주황 마름모)</span>
+          <span><i style="background:var(--accent)"></i>모의 GPS 동물 위치</span>
+          <span><i class="sq" style="background:var(--accent)"></i>실영상 카메라와 시야</span>
+          <span><i class="sq" style="background:var(--muted)"></i>모의 카메라</span>
+          <span>바닥: Nature Park 안내도 (축척 없음, 코끼리·기린·레서판다 카메라는 임시 위치)</span>
+        </div>
+        <div class="legend" id="legend2d">
           <span><i style="background:var(--accent)"></i>동물 정상</span>
           <span><i style="background:var(--crit)"></i>동물 경보</span>
           <span><i class="sq" style="background:var(--ok)"></i>현장 인력</span>
@@ -695,7 +714,248 @@ function renderMap(){
   });
   setHTML($('#mStaff'), (L.staff||S.em) ? S.staff.map(s=>'<g><rect x="'+(s.x-6)+'" y="'+(s.y-6)+'" width="12" height="12" rx="2" fill="#3ecf8e"/><text x="'+(s.x+10)+'" y="'+(s.y+4)+'" font-size="11" fill="#8d9ab4">'+s.n+'</text></g>').join('')+
     S.teams.map(t=>'<g><rect x="'+(t.x-8).toFixed(1)+'" y="'+(t.y-8).toFixed(1)+'" width="16" height="16" rx="3" fill="#f2b33d"/><text x="'+(t.x+12).toFixed(1)+'" y="'+(t.y+4).toFixed(1)+'" font-size="12" font-weight="600" fill="#f2b33d">'+t.n+'</text></g>').join('') : '');
+  update3d();
 }
+/* ---------- 3D map (R4): 안내도 PDF를 바닥에 깔고 구역·건물·카메라·사건을 단순 입체로 그린다 ----------
+   지도 내용은 서버의 /api/map (map/naturepark.json)에서 받는다. 2D 지도는 그대로 두고 전환만 한다.
+   three.js를 불러오지 못하거나, WebGL이 없거나, 지도 파일이 잘못되면 2D로 돌아가고 이유를 보여 준다. */
+const THREE_URL = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
+const M3_FPS = 15;          // 그리기 상한 (YOLO 분석에 CPU를 남긴다)
+const M3_SLOW_MS = 40;      // 한 장 그리는 데 평균 이만큼 넘게 걸리면 2D로 내린다
+const M3_FPS_DROP = 0.7;    // 3D를 켠 뒤 카메라 분석 속도가 켜기 전의 70% 아래로 떨어지면 2D로 내린다
+const M3 = {mode:'2d', state:'idle', msg:'', map:null, aspect:0.774, view:{az:0, pol:0.82, dist:78, tx:0, tz:4},
+  fpsLog:[], base:null, onAt:0, costs:[], frames:0, cost:null, slowSince:null, dropSince:null, raf:null, last:0, dirty:true, sig:''};
+
+function m3Note(text, bad){ const n=$('#m3msg'); n.textContent=text||''; n.hidden=!text; n.className='m3msg'+(bad?' s-warn':''); }
+function m3Mode(mode){
+  M3.mode=mode;
+  $('#map2dWrap').hidden = mode==='3d'; $('#map3dWrap').hidden = mode!=='3d';
+  $('#legend2d').hidden = mode==='3d'; $('#legend3d').hidden = mode!=='3d';
+  document.querySelectorAll('[data-mapview]').forEach(b=>b.setAttribute('aria-pressed', String(b.dataset.mapview===mode)));
+  if(mode==='3d'){ M3.onAt=performance.now(); M3.base=m3FpsMedian(60, 0); M3.slowSince=M3.dropSince=null; M3.costs=[]; M3.frames=0; M3.cost=null; M3.dirty=true; m3Resize(); m3Loop(); }
+}
+function m3Fail(reason){
+  M3.state = M3.state==='ready' ? 'ready' : 'failed';
+  m3Mode('2d'); m3Note('3D 지도를 켜지 못해 2D 지도를 보여 줍니다: '+reason, true);
+}
+function m3Fallback(reason){ m3Mode('2d'); m3Note('성능 때문에 2D 지도로 돌아왔습니다: '+reason+'. 3D 버튼으로 다시 켤 수 있습니다.', true); }
+
+function loadScript(url, ms){
+  return new Promise((ok, no)=>{
+    if(window.THREE) return ok();
+    const s=document.createElement('script'), t=setTimeout(()=>no(new Error('3D 라이브러리 응답 없음 ('+ms/1000+'초)')), ms);
+    s.src=url; s.onload=()=>{ clearTimeout(t); window.THREE?ok():no(new Error('3D 라이브러리를 읽지 못함')); };
+    s.onerror=()=>{ clearTimeout(t); no(new Error('3D 라이브러리를 내려받지 못함 (인터넷 연결 확인)')); };
+    document.head.appendChild(s);
+  });
+}
+function m3Valid(m){
+  const pt=p=>Array.isArray(p)&&p.length===2&&p.every(v=>typeof v==='number'&&v>=0&&v<=100);
+  if(!m||!m.source||!m.source.width||!m.source.height) return '지도 파일에 source(width, height)가 없음';
+  if(!Array.isArray(m.zones)||!m.zones.every(z=>z.id&&Array.isArray(z.polygon)&&z.polygon.length>=3&&z.polygon.every(pt))) return '구역(zones) 좌표가 잘못됨';
+  if(!Array.isArray(m.cameras)||!m.cameras.every(c=>c.id&&pt(c.pos)&&pt(c.target))) return '카메라(cameras) 좌표가 잘못됨';
+  if(m.buildings&&!m.buildings.every(b=>Array.isArray(b.rect)&&b.rect.length===4)) return '건물(buildings) 좌표가 잘못됨';
+  return '';
+}
+function show3d(){
+  if(M3.state==='ready'){ m3Note(''); return m3Mode('3d'); }
+  if(M3.state==='loading') return;
+  const probe=document.createElement('canvas');
+  if(!(probe.getContext('webgl')||probe.getContext('experimental-webgl'))) return m3Fail('이 브라우저에서 WebGL을 쓸 수 없음');
+  M3.state='loading'; m3Note('3D 지도를 불러오는 중입니다…');
+  Promise.all([
+    fetch('/api/map',{cache:'no-store'}).then(r=>{ if(r.status===401) toLogin(); if(!r.ok) throw new Error('지도 파일을 읽지 못함 (HTTP '+r.status+')'); return r.json(); }),
+    loadScript(THREE_URL, 10000)
+  ]).then(([map])=>{
+    const bad=m3Valid(map); if(bad) throw new Error(bad);
+    return m3Build(map);
+  }).then(()=>{ M3.state='ready'; m3Note(''); m3Mode('3d'); renderMap(); })
+    .catch(err=>{ M3.state='failed'; m3Fail(err.message||String(err)); M3.state='idle'; });
+}
+
+/* 안내도 좌표 (가로·세로 %) → 3D 바닥 좌표. 바닥은 가로 100, 세로 100×(높이/너비). */
+const m3P = (x,y) => [x-50, (y-50)*M3.aspect];
+function m3Label(text, color, size){
+  const c=document.createElement('canvas'), g=c.getContext('2d'), fs=40;
+  g.font='600 '+fs+'px "Malgun Gothic","Apple SD Gothic Neo",sans-serif';
+  const w=Math.ceil(g.measureText(text).width)+24; c.width=w; c.height=fs+20;
+  g.font='600 '+fs+'px "Malgun Gothic","Apple SD Gothic Neo",sans-serif';
+  g.fillStyle='rgba(10,17,30,.78)'; g.fillRect(0,0,w,c.height); g.fillStyle=color; g.textBaseline='middle'; g.fillText(text,12,c.height/2+2);
+  const tex=new THREE.CanvasTexture(c); tex.minFilter=THREE.LinearFilter;
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex, depthTest:false, transparent:true}));
+  sp.scale.set(size*w/c.height, size, 1); sp.renderOrder=10; return sp;
+}
+function m3Build(map){
+  return new Promise((ok, no)=>{
+    M3.map=map; M3.aspect=map.source.height/map.source.width;
+    const canvas=$('#map3d');
+    let renderer;
+    try { renderer=new THREE.WebGLRenderer({canvas, antialias:false, powerPreference:'low-power'}); }
+    catch(e){ return no(new Error('WebGL을 시작하지 못함')); }
+    renderer.setPixelRatio(1); renderer.setClearColor(0x0c1626);
+    const scene=new THREE.Scene(), cam=new THREE.PerspectiveCamera(42, 1.6, 1, 600);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+    const sun=new THREE.DirectionalLight(0xffffff, 0.55); sun.position.set(-40, 80, 30); scene.add(sun);
+    M3.r={renderer, scene, cam, zones:{}, cams:{}, live:{}, mock:[], animals:{}};
+    const W=100, H=100*M3.aspect;
+    new THREE.TextureLoader().load('/map/texture.png', tex=>{
+      const ground=new THREE.Mesh(new THREE.PlaneGeometry(W, H), new THREE.MeshLambertMaterial({map:tex}));
+      ground.rotation.x=-Math.PI/2; scene.add(ground);
+      map.zones.forEach(z=>{
+        const shape=new THREE.Shape(z.polygon.map(p=>{ const q=m3P(p[0],p[1]); return new THREE.Vector2(q[0], -q[1]); }));
+        const floor=new THREE.Mesh(new THREE.ShapeGeometry(shape), new THREE.MeshBasicMaterial({color:0x4c9dff, transparent:true, opacity:0.0, depthWrite:false}));
+        floor.rotation.x=-Math.PI/2; floor.position.y=0.05; scene.add(floor);
+        const pts=z.polygon.concat([z.polygon[0]]).map(p=>{ const q=m3P(p[0],p[1]); return new THREE.Vector3(q[0], 0.12, q[1]); });
+        const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({color:0x2c4168}));
+        scene.add(line);
+        const walls=new THREE.Group();
+        if(z.fence>0) for(let i=0;i<z.polygon.length;i++){
+          const a=m3P(...z.polygon[i]), b=m3P(...z.polygon[(i+1)%z.polygon.length]), len=Math.hypot(b[0]-a[0], b[1]-a[1]);
+          const wall=new THREE.Mesh(new THREE.PlaneGeometry(len, z.fence), new THREE.MeshBasicMaterial({color:0xe7edf7, transparent:true, opacity:0.35, side:THREE.DoubleSide, depthWrite:false}));
+          wall.position.set((a[0]+b[0])/2, z.fence/2, (a[1]+b[1])/2); wall.rotation.y=-Math.atan2(b[1]-a[1], b[0]-a[0]); walls.add(wall);
+        }
+        scene.add(walls);
+        const c=z.polygon.reduce((s,p)=>[s[0]+p[0]/z.polygon.length, s[1]+p[1]/z.polygon.length],[0,0]), q=m3P(c[0],c[1]);
+        const label=m3Label(z.name, '#e7edf7', 2.2); label.position.set(q[0], 4.2, q[1]); scene.add(label);
+        const xs=z.polygon.map(p=>p[0]), ys=z.polygon.map(p=>p[1]);
+        M3.r.zones[z.id]={floor, line, walls, center:c, box:[Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]};
+      });
+      (map.buildings||[]).forEach(b=>{
+        const [x1,y1,x2,y2]=b.rect, a=m3P(x1,y1), c=m3P(x2,y2), h=b.height||1.5;
+        const box=new THREE.Mesh(new THREE.BoxGeometry(Math.abs(c[0]-a[0]), h, Math.abs(c[1]-a[1])),
+          new THREE.MeshLambertMaterial({color:b.kind==='rock'?0x8b8f98:0xcdbb9d, transparent:true, opacity:0.92}));
+        box.position.set((a[0]+c[0])/2, h/2, (a[1]+c[1])/2); scene.add(box);
+        const l=m3Label(b.name, '#8d9ab4', 1.3); l.position.set((a[0]+c[0])/2, h+1.1, (a[1]+c[1])/2); scene.add(l);
+      });
+      map.cameras.forEach(c=>{
+        const p=m3P(...c.pos), t=m3P(...c.target), h=c.height||2.5, g=new THREE.Group();
+        const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.12,h,6), new THREE.MeshLambertMaterial({color:0x5f6d89}));
+        pole.position.set(p[0], h/2, p[1]); g.add(pole);
+        const headMat=new THREE.MeshLambertMaterial({color:c.live?0x4c9dff:0x8d9ab4});
+        const head=new THREE.Mesh(new THREE.BoxGeometry(0.9,0.6,0.6), headMat); head.position.set(p[0], h, p[1]);
+        head.rotation.y=-Math.atan2(t[1]-p[1], t[0]-p[0]); g.add(head);
+        const dx=t[0]-p[0], dz=t[1]-p[1], n=Math.hypot(dx,dz)||1, sx=-dz/n*n*0.45, sz=dx/n*n*0.45;
+        const fov=new THREE.BufferGeometry(); fov.setAttribute('position', new THREE.Float32BufferAttribute([p[0],h,p[1], t[0]+sx,0.1,t[1]+sz, t[0]-sx,0.1,t[1]-sz],3));
+        const fovMat=new THREE.MeshBasicMaterial({color:c.live?0x4c9dff:0x8d9ab4, transparent:true, opacity:0.16, side:THREE.DoubleSide, depthWrite:false});
+        g.add(new THREE.Mesh(fov, fovMat));
+        const label=m3Label(c.id+(c.live?'':' (모의)'), c.live?'#4c9dff':'#8d9ab4', 1.4); label.position.set(p[0], h+1.2, p[1]); g.add(label);
+        scene.add(g);
+        M3.r.cams[c.id]={headMat, fovMat, live:!!c.live, t};
+        if(c.live){   // 실제 분석 사건 표시: 붉은 기둥과 바닥 고리 (카메라가 보는 곳)
+          const beam=new THREE.Mesh(new THREE.CylinderGeometry(0.55,0.55,9,10,1,true), new THREE.MeshBasicMaterial({color:0xff5f5f, transparent:true, opacity:0.45, side:THREE.DoubleSide, depthWrite:false}));
+          beam.position.set(t[0], 4.5, t[1]);
+          const ring=new THREE.Mesh(new THREE.RingGeometry(1.4,2.0,24), new THREE.MeshBasicMaterial({color:0xff5f5f, transparent:true, opacity:0.8, side:THREE.DoubleSide, depthWrite:false}));
+          ring.rotation.x=-Math.PI/2; ring.position.set(t[0], 0.15, t[1]);
+          const tag=m3Label('실제 사건', '#ff5f5f', 1.5); tag.position.set(t[0], 9.8, t[1]);
+          const ev=new THREE.Group(); ev.add(beam, ring, tag); ev.visible=false; scene.add(ev);
+          M3.r.live[c.live]={group:ev, ring, beam, cam:c.id};
+        }
+      });
+      const diamond=new THREE.OctahedronGeometry(1.1), mockMat=new THREE.MeshLambertMaterial({color:0xf2b33d});
+      for(let i=0;i<6;i++){ const m=new THREE.Mesh(diamond, mockMat); m.visible=false; scene.add(m); M3.r.mock.push(m); }
+      const ball=new THREE.SphereGeometry(0.85, 12, 8);
+      S.animals.forEach(a=>{ const m=new THREE.Mesh(ball, new THREE.MeshLambertMaterial({color:0x4c9dff})); m.visible=false; scene.add(m); M3.r.animals[a.id]=m; });
+      m3Controls(canvas); ok();
+    }, undefined, ()=>no(new Error('안내도 이미지(/map/texture.png)를 읽지 못함')));
+  });
+}
+function m3Controls(canvas){
+  let drag=null;
+  canvas.addEventListener('pointerdown', e=>{ drag={x:e.clientX, y:e.clientY, pan:e.shiftKey||e.button===2}; canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener('pointermove', e=>{
+    if(!drag) return; const dx=e.clientX-drag.x, dy=e.clientY-drag.y, v=M3.view; drag.x=e.clientX; drag.y=e.clientY;
+    if(drag.pan){ const s=v.dist/400; v.tx-= (dx*Math.cos(v.az)+dy*Math.sin(v.az))*s; v.tz-= (dy*Math.cos(v.az)-dx*Math.sin(v.az))*s; }
+    else { v.az-=dx*0.008; v.pol=Math.max(0.15, Math.min(1.35, v.pol-dy*0.006)); }
+    M3.dirty=true;
+  });
+  ['pointerup','pointercancel'].forEach(n=>canvas.addEventListener(n, ()=>{ drag=null; }));
+  canvas.addEventListener('contextmenu', e=>e.preventDefault());
+  canvas.addEventListener('wheel', e=>{ e.preventDefault(); M3.view.dist=Math.max(25, Math.min(170, M3.view.dist*(e.deltaY>0?1.1:0.9))); M3.dirty=true; }, {passive:false});
+  canvas.addEventListener('dblclick', ()=>{ Object.assign(M3.view, {az:0, pol:0.82, dist:78, tx:0, tz:4}); M3.dirty=true; });
+}
+function m3Resize(){
+  if(!M3.r) return; const w=$('#map3dWrap').clientWidth||600, h=Math.round(w*0.6);
+  M3.r.renderer.setSize(w, h, false); $('#map3d').style.height=h+'px'; M3.r.cam.aspect=w/h; M3.r.cam.updateProjectionMatrix(); M3.dirty=true;
+}
+function m3Loop(){
+  if(M3.raf||M3.state!=='ready') return;
+  const frame=now=>{
+    if(M3.mode!=='3d'||document.hidden){ M3.raf=null; return; }
+    M3.raf=requestAnimationFrame(frame);
+    if(now-M3.last < 1000/M3_FPS) return;
+    const r=M3.r, v=M3.view, pulsing=Object.values(r.live).some(l=>l.group.visible)||r.mock.some(m=>m.visible);
+    if(!M3.dirty&&!pulsing) return;   // 바뀐 것이 없으면 그리지 않는다 (CPU를 YOLO 분석에 남긴다)
+    M3.last=now; M3.dirty=false;
+    const t0=performance.now();
+    r.cam.position.set(v.tx+v.dist*Math.sin(v.pol)*Math.sin(v.az), v.dist*Math.cos(v.pol), v.tz+v.dist*Math.sin(v.pol)*Math.cos(v.az));
+    r.cam.lookAt(v.tx, 0, v.tz);
+    const pulse=0.5+0.5*Math.sin(now/180);
+    Object.values(r.live).forEach(l=>{ if(l.group.visible){ l.ring.scale.setScalar(1+pulse*0.6); l.beam.material.opacity=0.25+0.35*pulse; } });
+    r.mock.forEach(m=>{ if(m.visible) m.rotation.y=now/600; });
+    r.renderer.render(r.scene, r.cam);
+    // 처음 10장은 텍스처 올리기·셰이더 준비로 느리므로 빼고, 최근 30장의 중앙값을 본다
+    if(++M3.frames>10){ M3.costs.push(performance.now()-t0); M3.costs=M3.costs.slice(-30); const c=M3.costs.slice().sort((a,b)=>a-b); M3.cost=c[Math.floor(c.length/2)]; }
+    m3Guard();
+  };
+  M3.raf=requestAnimationFrame(frame);
+}
+/* I6: 성능 예산. 그리기가 느리거나, 3D를 켠 뒤 YOLO 분석 속도가 떨어지면 2D로 내린다. */
+function m3FpsSample(){
+  if(!LIVE.on) return;
+  const fps=LIVE.cams.filter(c=>c.connected&&!c.error).map(c=>c.fps).sort((a,b)=>a-b);
+  if(fps.length) M3.fpsLog.push({t:performance.now(), v:fps[Math.floor(fps.length/2)], on:M3.mode==='3d'});
+  M3.fpsLog=M3.fpsLog.filter(s=>performance.now()-s.t<180000);
+}
+function m3FpsMedian(sec, on){
+  const now=performance.now(), xs=M3.fpsLog.filter(s=>now-s.t<sec*1000&&(on==null||+s.on===+on)).map(s=>s.v).sort((a,b)=>a-b);
+  return xs.length>=5 ? xs[Math.floor(xs.length/2)] : null;
+}
+function m3Guard(){
+  const now=performance.now();
+  M3.slowSince = M3.costs.length>=10&&M3.cost>M3_SLOW_MS ? (M3.slowSince||now) : null;
+  if(M3.slowSince && now-M3.slowSince>5000) return m3Fallback('3D 한 장 그리는 데 평균 '+M3.cost.toFixed(0)+'ms');
+  const cur=m3FpsMedian(15, 1);
+  const dropped = M3.base && cur!=null && now-M3.onAt>20000 && cur<M3.base*M3_FPS_DROP;
+  M3.dropSince = dropped ? (M3.dropSince||now) : null;
+  if(M3.dropSince && now-M3.dropSince>10000) return m3Fallback('카메라 분석 속도가 '+M3.base.toFixed(1)+' → '+cur.toFixed(1)+' fps로 떨어짐');
+  const info=$('#m3perf'), cur2=m3FpsMedian(10);
+  info.textContent='그리기 최대 '+M3_FPS+'fps (바뀔 때만) · 한 장 '+(M3.cost==null?'측정 중':M3.cost.toFixed(1)+'ms')+(cur2!=null?' · 카메라 분석 '+cur2.toFixed(1)+' fps'+(M3.base?' (3D 켜기 전 '+M3.base.toFixed(1)+')':''):'');
+}
+/* 2D 모의 지도 좌표(1000×600)의 동물 위치를, 같은 구역 안의 상대 위치로 안내도 좌표에 옮긴다. */
+function m3Animal(a){
+  const z=Z(a.zone), nz=M3.r.zones[a.zone]; if(!z||!nz) return null;
+  const xs=z.pts.split(' ').map(p=>+p.split(',')[0]), ys=z.pts.split(' ').map(p=>+p.split(',')[1]);
+  const ox=Math.min(...xs), oy=Math.min(...ys), ow=Math.max(...xs)-ox, oh=Math.max(...ys)-oy, b=nz.box;
+  return m3P(b[0]+(a.pos.x-ox)/ow*(b[2]-b[0]), b[1]+(a.pos.y-oy)/oh*(b[3]-b[1]));
+}
+function update3d(){
+  if(M3.state!=='ready'||M3.mode!=='3d') return;
+  const r=related(), L=S.layers;
+  M3.dirty=true;
+  Object.entries(M3.r.zones).forEach(([id,z])=>{
+    const g=Z(id)?grade(id):['','ok'];
+    z.floor.material.opacity = L.heat&&g[1]!=='ok' ? (g[1]==='crit'?0.32:0.2) : 0;
+    z.floor.material.color.set(g[1]==='crit'?0xff5f5f:0xf2b33d);
+    z.line.material.color.set(r.zone===id?0xe7edf7:0x2c4168); z.walls.visible=L.terrain; z.line.visible=L.terrain;
+  });
+  Object.entries(M3.r.cams).forEach(([id,c])=>{
+    const col = r.cam===id ? 0xe7edf7 : S.camState[id] ? 0xf2b33d : c.live ? 0x4c9dff : 0x8d9ab4;
+    c.headMat.color.set(col); c.fovMat.color.set(col); c.fovMat.opacity = r.cam===id ? 0.3 : 0.14;
+  });
+  const active=new Set((LIVE.on?LIVE.events:[]).filter(e=>e.raw.active&&e.status!=='false').map(e=>e.raw.camera_id));
+  Object.entries(M3.r.live).forEach(([cid,l])=>{ l.group.visible=active.has(cid); });
+  const mock=S.events.filter(e=>!e.live&&(e.status==='new'||e.status==='ack')&&e.zone&&M3.r.zones[e.zone]);
+  M3.r.mock.forEach((m,i)=>{
+    const e=mock[i]; m.visible=!!e; if(!e) return;
+    const c=M3.r.zones[e.zone].center, q=m3P(c[0]+(i%3-1)*2.5, c[1]+3); m.position.set(q[0], 3.2, q[1]);
+  });
+  S.animals.forEach(a=>{
+    const m=M3.r.animals[a.id], q=L.gps&&m3Animal(a); m.visible=!!q; if(!q) return;
+    m.position.set(q[0], 0.9, q[1]);
+    m.material.color.set(r.animal===a.id?0xe7edf7:animalAlarm(a)?0xff5f5f:a.temp==null?0x5f6d89:0x4c9dff);
+  });
+}
+
 function renderLayers(){
   setHTML($('#layers'), LAYERS.map(l=>'<button data-layer="'+l[0]+'" aria-pressed="'+!!S.layers[l[0]]+'">'+l[1]+'</button>').join(''));
 }
@@ -1198,6 +1458,10 @@ document.addEventListener('keydown',ev=>{ if(ev.key==='Escape') closeDialog(); i
 $('#tl').addEventListener('click',ev=>{ const r=$('#tl').getBoundingClientRect(), x=(ev.clientX-r.left)/r.width*900; const t=T(9,0)+(x-44)/836*9*3600; S.viewT=Math.max(T(9,0),Math.min(S.t,t)); renderTimeline(); });
 $('#q').addEventListener('input',renderAnimals); $('#riskF').addEventListener('change',renderAnimals); $('#showDone').addEventListener('change',renderFeed);
 $('#scnPlay').addEventListener('click',startScenario);
+document.querySelectorAll('[data-mapview]').forEach(b=>b.addEventListener('click',()=>{ if(b.dataset.mapview==='3d') show3d(); else { m3Mode('2d'); m3Note(''); } }));
+setInterval(m3FpsSample, 1000);
+window.addEventListener('resize', ()=>{ if(M3.mode==='3d') m3Resize(); });
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden&&M3.mode==='3d') m3Loop(); });
 $('#scnPause').addEventListener('click',()=>{ S.playing=!S.playing; $('#scnPause').textContent=S.playing?'일시정지':'계속'; });
 $('#scnReset').addEventListener('click',()=>{ init(); renderAll(); });
 $('#scnSpeed').addEventListener('change',e=>{ S.speed=+e.target.value; });

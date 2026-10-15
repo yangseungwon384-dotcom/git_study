@@ -68,6 +68,8 @@ from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse, Redirec
 HERE = Path(__file__).resolve().parent
 ENGINE_DIR = HERE.parent / 'zoo_safe'
 PAGE = HERE / 'twin_control.html'
+# 3D 지도 설정 (R4). 구역·건물·카메라 좌표와 바닥 이미지 이름. 고치고 새로고침하면 바로 반영된다.
+MAP_FILE = HERE / 'map' / 'naturepark.json'
 PAGE_HEAD = ('<!doctype html><html lang="ko"><head><meta charset="utf-8">'
              '<meta name="viewport" content="width=device-width,initial-scale=1"></head><body>')
 FRAME_SEC = 0.2    # 화면용 영상 갱신 주기
@@ -541,6 +543,24 @@ def create_app(zj, engine, args, accounts):
     @app.get('/api/state')
     def api_state():
         return state()
+
+    @app.get('/api/map')
+    def api_map():
+        try:
+            return json.loads(MAP_FILE.read_text(encoding='utf-8'))
+        except (OSError, ValueError) as exc:
+            raise HTTPException(500, f'지도 설정을 읽지 못했습니다: {type(exc).__name__}')
+
+    @app.get('/map/texture.png')
+    def map_texture():
+        try:
+            name = json.loads(MAP_FILE.read_text(encoding='utf-8'))['source']['texture']
+        except (OSError, ValueError, KeyError, TypeError):
+            raise HTTPException(404, '지도 이미지가 없습니다.')
+        path = (MAP_FILE.parent / str(name)).resolve()
+        if path.parent != MAP_FILE.parent.resolve() or not path.is_file():
+            raise HTTPException(404, '지도 이미지가 없습니다.')
+        return FileResponse(path, media_type='image/png')
 
     @app.websocket('/ws')
     async def ws(socket: WebSocket):
