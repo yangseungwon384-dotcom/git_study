@@ -72,7 +72,7 @@ PAGE = HERE / 'twin_control.html'
 MAP_FILE = HERE / 'map' / 'naturepark.json'
 PAGE_HEAD = ('<!doctype html><html lang="ko"><head><meta charset="utf-8">'
              '<meta name="viewport" content="width=device-width,initial-scale=1"></head><body>')
-FRAME_SEC = 0.2    # 화면용 영상 갱신 주기
+FRAME_SEC = 0.1    # 화면용 영상 갱신 주기 (R5: 0.2 → 0.1. 영상은 최신 프레임, 박스는 마지막 분석 결과)
 STATE_SEC = 0.5    # 상태 전송 주기
 EVENT_LIMIT = 60   # 화면에 넘기는 오늘 사건 수 (최근 것부터)
 EVENT_ID = re.compile(r'^[0-9a-f]{32}$')
@@ -286,6 +286,9 @@ def create_app(zj, engine, args, accounts):
 
     stop = threading.Event()
     frames = {}
+    viewers = {}                                   # 카메라별 영상 연결 수
+    display = {cid: [] for cid in engine.runtime}  # 카메라별 최근 화면 갱신 시각 (진단용)
+    pump_ms = []                                   # 화면 한 바퀴 만드는 데 걸린 시간 (진단용)
     snapshot_root = (engine.db.root / 'snapshots').resolve()
     live_ai = bool(args.jev and args.provider == 'ollama')
     ai_args = types.SimpleNamespace(
@@ -373,21 +376,32 @@ def create_app(zj, engine, args, accounts):
             job.update(running=False, finished_at=zj.now().isoformat())
 
     def pump():
-        """step_all이 그린 화면을 JPEG로 바꿔 둔다. 영상 요청은 이 사본만 읽는다."""
+        """화면용 영상을 JPEG로 바꿔 둔다. 영상 요청은 이 사본만 읽는다.
+        분석과 따로 돈다: 영상은 최신 프레임, 박스는 마지막 분석 결과 (twin_vision.LiveRenderer).
+        보는 사람이 없는 카메라와 바뀌지 않은 화면은 압축하지 않는다."""
         import cv2
         ids = list(engine.runtime)
+        renderer = twin_vision.LiveRenderer(engine, zj.BOX_NOTE_SEC)
+        keys = {}
         while not stop.is_set():
+            started = time.monotonic()
             try:
-                for cid, image in zip(ids, engine.step_all()):
-                    if image is None:
+                watching = [cid for cid in ids if viewers.get(cid)]
+                for cid, image, key in renderer.frames(watching):
+                    if image is None or keys.get(cid) == key:
                         continue
-                    ok, buf = cv2.imencode('.jpg', cv2.cvtColor(image, cv2.COLOR_RGB2BGR),
-                                           [cv2.IMWRITE_JPEG_QUALITY, 75])
+                    ok, buf = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 75])
                     if ok:
                         frames[cid] = buf.tobytes()
+                        keys[cid] = key
+                        display[cid].append(time.monotonic())
+                        del display[cid][:-50]
             except Exception as exc:
                 print('[frame]', type(exc).__name__, exc)
-            stop.wait(FRAME_SEC)
+            spent = time.monotonic() - started
+            pump_ms.append(spent * 1000)
+            del pump_ms[:-50]
+            stop.wait(max(0.01, FRAME_SEC - spent))
 
     def event_view(row, ai=None):
         path = row.get('snapshot_path')
@@ -414,6 +428,7 @@ def create_app(zj, engine, args, accounts):
                 cameras.append(dict(
                     id=cid, title=r['cam']['title'], connected=r['frame'] is not None,
                     error=r['error'], fps=round(r['analysis_fps'], 1),
+                    display_fps=round(sum(time.monotonic() - t <= 3 for t in display[cid]) / 3, 1),
                     armed=bool(cfg and cfg.get('enabled')),
                     ignored=len(getattr(engine.model, 'ignored', {}).get(cid, [])),
                     detections=[dict(name=d['name'], label=twin_vision.label_of(d['name']),
@@ -424,6 +439,7 @@ def create_app(zj, engine, args, accounts):
         return dict(now=current.isoformat(),
                     now_sec=current.hour * 3600 + current.minute * 60 + current.second,
                     boot_error=engine.boot_error, cameras=cameras,
+                    pump_ms=round(sorted(pump_ms)[len(pump_ms) // 2], 1) if pump_ms else None,
                     events=with_ai(rows[-EVENT_LIMIT:]),
                     unacked=engine.db.unacked_count(),
                     ai=dict(live=live_ai, model=ai_args.jev_model, job=dict(job)))
@@ -589,13 +605,17 @@ def create_app(zj, engine, args, accounts):
 
         async def parts():
             sent = None
-            while not stop.is_set():
-                jpeg = frames.get(camera_id)
-                if jpeg is not None and jpeg is not sent:
-                    sent = jpeg
-                    yield (b'--frame\r\nContent-Type: image/jpeg\r\nContent-Length: '
-                           + str(len(jpeg)).encode() + b'\r\n\r\n' + jpeg + b'\r\n')
-                await asyncio.sleep(FRAME_SEC / 2)
+            viewers[camera_id] = viewers.get(camera_id, 0) + 1
+            try:
+                while not stop.is_set():
+                    jpeg = frames.get(camera_id)
+                    if jpeg is not None and jpeg is not sent:
+                        sent = jpeg
+                        yield (b'--frame\r\nContent-Type: image/jpeg\r\nContent-Length: '
+                               + str(len(jpeg)).encode() + b'\r\n\r\n' + jpeg + b'\r\n')
+                    await asyncio.sleep(FRAME_SEC / 4)
+            finally:
+                viewers[camera_id] -= 1
 
         return StreamingResponse(parts(), media_type='multipart/x-mixed-replace; boundary=frame',
                                  headers={'Cache-Control': 'no-store'})

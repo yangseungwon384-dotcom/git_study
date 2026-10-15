@@ -422,7 +422,10 @@ const pad = n => String(n).padStart(2,'0');
 const fmt = t => { t=Math.floor(t); return pad(Math.floor(t/3600))+':'+pad(Math.floor(t%3600/60))+':'+pad(t%60); };
 const hm = t => fmt(t).slice(0,5);
 const T = (h,m,s) => h*3600+m*60+(s||0);
-const setHTML = (el, html) => { if (el._h !== html) { el._h = html; el.innerHTML = html; } };
+/* 영상(MJPEG) 칸을 지우기 전에 연결부터 끊는다. 지우기만 하면 연결이 남아, 브라우저의 서버당 연결 한도(6개)에 걸려
+   새 영상 칸이 검게 기다린다 (R5). */
+const stopStreams = el => el.querySelectorAll('img[src*="/stream/"]').forEach(i => { i.src = 'data:,'; });
+const setHTML = (el, html) => { if (el._h !== html) { stopStreams(el); el._h = html; el.innerHTML = html; } };
 const dist = (a,b) => Math.hypot(a.x-b.x, a.y-b.y);
 const LV = {1:['● Level 1','주의'],2:['◆ Level 2','경고'],3:['▲ Level 3','위험']};
 const esc = v => String(v==null?'':v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -1039,11 +1042,11 @@ function renderCamView(){
   if(CV.edit){
     $('#cvHint').textContent='영상 위를 눌러 구역의 꼭짓점을 찍습니다';
     const html=editorHTML(CV.edit);
-    if(grid._h!==html){ grid._h=html; grid.innerHTML=html; $('#edOn').checked=CV.edit.enabled; $('#edPerson').checked=CV.edit.person; drawEdit(); }
+    if(grid._h!==html){ stopStreams(grid); grid._h=html; grid.innerHTML=html; $('#edOn').checked=CV.edit.enabled; $('#edPerson').checked=CV.edit.person; drawEdit(); }
     return;
   }
   const html=show.map(id=>'<article class="panel cv">'+camTile(id,false,'data-cvcam')+'<div class="cv-info" data-cvinfo="'+id+'"></div></article>').join('');
-  if(grid._h!==html){ grid._h=html; grid.innerHTML=html; }
+  if(grid._h!==html){ stopStreams(grid); grid._h=html; grid.innerHTML=html; }
   show.forEach(id=>{ const el=grid.querySelector('[data-cvinfo="'+id+'"]'); if(el) setHTML(el, camInfo(id)); });
 }
 /* ---------- safe-zone editor (camera tab, 1분할) ---------- */

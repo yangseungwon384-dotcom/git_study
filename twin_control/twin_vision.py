@@ -391,6 +391,101 @@ def render_all(engine, box_note_sec):
     return out
 
 
+class LiveRenderer:
+    """화면용 영상 (R5). 영상은 최신 프레임으로 부드럽게 보내고, 박스·글자는 마지막 분석 결과를 겹친다.
+
+    분석(analyze 스레드)은 그대로 둔다. 여기서는 엔진 상태를 읽기만 한다.
+    박스와 글자 층은 분석 결과·구역·배너가 바뀔 때만 다시 그리고, 매 프레임에는 겹치기만 한다.
+    박스 위치는 마지막으로 분석한 프레임 기준이라, 빠르게 움직이는 대상과는 최대 분석 간격만큼 어긋날 수 있다.
+    """
+
+    def __init__(self, engine, box_note_sec):
+        self.engine = engine
+        self.box_note_sec = box_note_sec
+        self.layers = {}     # cid -> (key, overlay BGR, mask)
+        self.builds = 0      # 겹침 층을 다시 그린 횟수 (진단용)
+
+    def frames(self, cids):
+        """[(cid, BGR 그림 또는 None, 내용 키)]. 내용 키가 같으면 그림도 같다 (다시 압축할 필요 없음)."""
+        import cv2
+        import numpy as np
+        engine = self.engine
+        proxy = engine.model if isinstance(engine.model, DetectorProxy) else None
+        with engine.lock:
+            shots = []
+            for cid in cids:
+                r = engine.runtime[cid]
+                shots.append((cid, r['frame'], r['seq'], r['cfg'], r['rendered'], r['session'], r['banner_text'],
+                              r['banner_until'], r.get('show_roi', True),
+                              tuple(map(tuple, proxy.ignored.get(cid, []))) if proxy else ()))
+        out = []
+        now = time.monotonic()
+        for cid, frame, seq, cfg, rendered, session, banner_text, banner_until, show_roi, ignored in shots:
+            if frame is None:
+                out.append((cid, None, None))
+                continue
+            h, w = frame.shape[:2]
+            age = now - rendered[0] if rendered else None
+            fresh = bool(rendered and rendered[1] == session and age <= engine.args.max_gap)
+            note = round(age, 1) if fresh and age >= self.box_note_sec else None
+            banner = banner_text if banner_text and now < banner_until else ''
+            key = (w, h, json.dumps(cfg, sort_keys=True) if show_roi and cfg else None,
+                   (rendered[0], ignored) if fresh else 'stale', note, banner)
+            layer = self.layers.get(cid)
+            if not layer or layer[0] != key:
+                overlay, mask = self.build(w, h, cfg if show_roi else None, rendered[2] if fresh else None,
+                                           ignored if fresh else (), note, banner, fresh)
+                layer = self.layers[cid] = (key, overlay, mask)
+                self.builds += 1
+            # 겹치기는 OpenCV로 한다. numpy 불리언 마스크는 카메라당 약 16ms 동안 GIL을 잡아 분석 스레드를 늦춘다.
+            canvas = frame.copy()
+            if banner:
+                band = canvas[52:92]
+                cv2.addWeighted(band, 0.25, np.full_like(band, (0, 0, 180)), 0.75, 0, dst=band)
+            cv2.copyTo(layer[1], layer[2], canvas)
+            out.append((cid, canvas, (seq, key)))
+        return out
+
+    def build(self, w, h, cfg, detections, ignored, note, banner, fresh):
+        """박스·구역선·글자를 투명 바탕에 한 번 그린다. render_all과 같은 색과 문구."""
+        import cv2
+        import numpy as np
+        from PIL import Image, ImageDraw
+        rgba = np.zeros((h, w, 4), np.uint8)
+        texts = []
+        if cfg and cfg.get('polygon'):
+            points = (np.asarray(cfg['polygon']) * [w - 1, h - 1]).astype(np.int32)
+            cv2.polylines(rgba, [points], True, (230, 220, 0, 255), 2)
+            texts.append((10, 30, '구역 감시 중' if cfg.get('enabled') else '구역 감시 꺼짐', (230, 220, 0), 15))
+        if cfg and cfg.get('exclude_polygon'):
+            extra = (np.asarray(cfg['exclude_polygon']) * [w - 1, h - 1]).astype(np.int32)
+            cv2.polylines(rgba, [extra], True, (255, 140, 0, 255), 2)
+        if detections is not None:
+            for bbox in ignored:
+                x1, y1, x2, y2 = (int(v) for v in bbox)
+                cv2.rectangle(rgba, (x1, y1), (x2, y2), (150, 150, 150, 255), 1)
+            for d in detections:
+                x1, y1, x2, y2 = d['bbox']
+                cv2.rectangle(rgba, (x1, y1), (x2, y2), (255, 0, 0, 255) if d['danger'] else (0, 210, 0, 255), 2)
+                zone = ZONE_KO.get(d.get('zone') or '', '')
+                texts.append((x1, max(2, y1 - 20), f"{label_of(d['name'])} {d['confidence']:.2f}"
+                              + (' ' + zone if zone else ''),
+                              (255, 80, 80) if d['danger'] else (60, 230, 60), 14))
+            if note is not None:
+                texts.append((10, h - 26, f'이전 분석 결과 {note:.1f}초', (230, 220, 0), 15))
+        elif not fresh:
+            texts.append((10, h - 26, '분석 결과 만료: 박스 숨김', (230, 220, 0), 15))
+        if banner:
+            texts.append((12, 62, banner, (255, 255, 255), 15))
+        if texts:
+            image = Image.fromarray(rgba, 'RGBA')
+            draw = ImageDraw.Draw(image)
+            for x, y, text, color, size in texts:
+                draw.text((x, y), text, font=_font(size), fill=color + (255,), stroke_width=2, stroke_fill=(0, 0, 0, 255))
+            rgba = np.asarray(image)
+        return np.ascontiguousarray(rgba[..., 2::-1]), (rgba[..., 3] > 0).astype(np.uint8)
+
+
 def left_safe(samples, stamp):
     """samples: [(mono, conf, side)]. 마지막 안전 관측 다음의 첫 관측이 알림 시각보다 몇 초 전인지. 안전 관측이 없으면 None."""
     last_safe = max((i for i, x in enumerate(samples) if x[2] == 'safe'), default=None)
