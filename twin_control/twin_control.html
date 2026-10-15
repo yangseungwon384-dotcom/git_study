@@ -95,8 +95,8 @@ body.em .grid{grid-template-columns:260px minmax(0,1fr) 350px}
 #map text{font-family:var(--sans)}
 .zone{cursor:pointer}
 .mk{cursor:pointer}
-.mk.sel circle.ring{stroke:var(--fg);stroke-width:3}
-.mk.alarm circle.ring{animation:pulse 1s infinite}
+.mk.sel .ring{stroke:var(--fg);stroke-width:3}
+.mk.alarm .ring,.pulse{animation:pulse 1s infinite}
 @keyframes pulse{50%{opacity:.25}}
 .viewsw{display:inline-flex;gap:4px;margin-left:8px;vertical-align:middle}
 .viewsw button{background:transparent;border:1px solid var(--line-2);border-radius:6px;padding:1px 10px;color:var(--muted);font-size:12px}
@@ -109,6 +109,7 @@ body.em .grid{grid-template-columns:260px minmax(0,1fr) 350px}
 .legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:11.5px;color:var(--muted)}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
 .legend i.sq{border-radius:2px}
+.legend svg.lg{vertical-align:-3px;margin-right:4px}
 
 /* cctv */
 .cams{display:grid;grid-template-columns:1fr 1fr;gap:6px}
@@ -367,13 +368,19 @@ a.btn[aria-disabled="true"]{opacity:.45;pointer-events:none}
           <span>바닥: Nature Park 안내도 (축척 없음, 코끼리·기린·레서판다 카메라는 임시 위치)</span>
         </div>
         <div class="legend" id="legend2d">
-          <span><i style="background:var(--accent)"></i>동물 정상</span>
-          <span><i style="background:var(--crit)"></i>동물 경보</span>
-          <span><i class="sq" style="background:var(--ok)"></i>현장 인력</span>
-          <span><i class="sq" style="background:var(--warn)"></i>대응조</span>
-          <span><i class="sq" style="background:var(--crit);opacity:.5"></i>혼잡</span>
-          <span><i class="sq" style="background:var(--warn);opacity:.5"></i>보통</span>
-          <span><i class="sq" style="background:var(--fg)"></i>대피 건물 · 출입문</span>
+          <span><svg class="lg" viewBox="-11 -11 22 22" width="16" height="16" aria-hidden="true"><path d="M0,-9 L9,0 L0,9 L-9,0 Z" fill="#0c1626" stroke="#4c9dff" stroke-width="2"/></svg>맹수</span>
+          <span><svg class="lg" viewBox="-11 -11 22 22" width="16" height="16" aria-hidden="true"><rect x="-7" y="-7" width="14" height="14" rx="3" fill="#0c1626" stroke="#4c9dff" stroke-width="2"/></svg>주의 동물</span>
+          <span><svg class="lg" viewBox="-11 -11 22 22" width="16" height="16" aria-hidden="true"><circle r="7" fill="#0c1626" stroke="#4c9dff" stroke-width="2"/></svg>일반 동물</span>
+          <span><svg class="lg" viewBox="-11 -11 22 22" width="16" height="16" aria-hidden="true"><circle r="7" fill="#0c1626" stroke="#ff5f5f" stroke-width="2"/><circle cx="6" cy="-6" r="4" fill="#ff5f5f"/></svg>경보 (빨강 + !)</span>
+          <span><svg class="lg" viewBox="-11 -11 22 22" width="16" height="16" aria-hidden="true"><circle r="8" fill="none" stroke="#8d9ab4" stroke-width="1.5" stroke-dasharray="3 3"/></svg>점선 = 모의 위치·장비</span>
+          <span><svg class="lg" viewBox="-11 -11 22 22" width="16" height="16" aria-hidden="true"><rect x="-7" y="-4" width="10" height="8" rx="2" fill="#4c9dff" stroke="#e7edf7"/><path d="M3,-2 L8,-5 L8,5 L3,2 Z" fill="#4c9dff"/></svg>실영상 카메라</span>
+          <span><svg class="lg" viewBox="-11 -11 22 22" width="16" height="16" aria-hidden="true"><rect x="-7" y="-4" width="10" height="8" rx="2" fill="#0c1626" stroke="#8d9ab4" stroke-dasharray="2 2"/></svg>모의 카메라</span>
+          <span><svg class="lg" viewBox="-11 -11 22 22" width="16" height="16" aria-hidden="true"><circle r="8" fill="none" stroke="#ff5f5f" stroke-width="2"/><circle cx="6" cy="-6" r="4" fill="#ff5f5f"/></svg>실제 분석 사건 (건수)</span>
+          <span><svg class="lg" viewBox="-11 -11 22 22" width="16" height="16" aria-hidden="true"><circle r="8" fill="#0c1626" stroke="#3ecf8e" stroke-dasharray="2 2"/><circle cy="-2" r="2.3" fill="#3ecf8e"/><path d="M-4,4 q4,-6 8,0 Z" fill="#3ecf8e"/></svg>현장 인력 · 대응조 (모의)</span>
+          <span><svg class="lg" viewBox="-11 -11 22 22" width="16" height="16" aria-hidden="true"><rect x="-9" y="-6" width="18" height="12" fill="rgba(255,95,95,.35)" stroke="#ff5f5f" stroke-dasharray="3 2"/></svg>혼잡</span>
+          <span><svg class="lg" viewBox="-11 -11 22 22" width="16" height="16" aria-hidden="true"><rect x="-9" y="-6" width="18" height="12" fill="rgba(242,179,61,.3)" stroke="#f2b33d" stroke-dasharray="3 2"/></svg>보통</span>
+          <span><svg class="lg" viewBox="-11 -11 22 22" width="16" height="16" aria-hidden="true"><rect x="-7" y="-2" width="14" height="9" fill="#d8c6a3"/><path d="M-9,-2 L0,-9 L9,-2 Z" fill="#a9523f"/></svg>대피 건물</span>
+          <span><svg class="lg" viewBox="-11 -11 22 22" width="16" height="16" aria-hidden="true"><rect x="-9" y="-6" width="18" height="12" fill="#1f3d29" stroke="#9fcf8b" stroke-dasharray="1 3"/></svg>방사장 울타리</span>
         </div>
       </div>
     </section>
@@ -677,28 +684,91 @@ function liveVitals(){
 }
 
 /* ---------- map ---------- */
+/* R7 I8: 2D 맵 그리기 시간 (최근 60번). 지도 요소의 data-ms에 중앙값을 남겨 점검 도구가 읽는다. */
+const M2 = {ms:[]};
+function renderMap(){
+  const t0=performance.now();
+  renderMap2d();
+  M2.ms.push(performance.now()-t0); if(M2.ms.length>60) M2.ms.shift();
+  const c=M2.ms.slice().sort((a,b)=>a-b); $('#map').dataset.ms=c[Math.floor(c.length/2)].toFixed(2);
+}
+/* ---------- 2D map (R7): 안내도 톤의 단순 일러스트. 판정과 상관없는 표현만 바꿨다 ----------
+   규칙 (docs/map2d_rule.md): 실제 분석(실영상 카메라, 진행 중 실제 사건)은 채운 모양,
+   모의(동물 GPS 위치, 현장 인력, 대응조, 모의 카메라)는 점선 테두리. 경보는 색과 함께 '!' 표시와 깜빡임으로 알린다.
+   지도 요소는 처음 한 번 만들고, 이후에는 속성만 바꾼다 (그리기 예산: 한 번에 1ms 이하). */
+const MAPC = {ground:'#13241a', tree:'#1f4d2e', treeHi:'#2b6a3d', roadEdge:'#2a3140', road:'#4b5566', roadLine:'#6b768a',
+  pen:'#1f3d29', fence:'#9fcf8b', meadow:'#2c3a22', plaza:'#36362f', plazaEdge:'#7a7563', water:'#16566a', waterEdge:'#3fa3bd',
+  wall:'#d8c6a3', roof:'#a9523f', label:'#f1f5ea', halo:'#0b1510', live:'#4c9dff', mock:'#8d9ab4', crit:'#ff5f5f', warn:'#f2b33d', ok:'#3ecf8e'};
+const ZONE_KIND = {forest:'pen', safari:'pen', farm:'pen', hill:'meadow', plaza:'plaza', kayak:'water'};
+const ptsOf = z => z.pts.split(' ').map(p=>p.split(',').map(Number));
+function inPoly(x,y,pts){ let c=false; for(let i=0,j=pts.length-1;i<pts.length;j=i++){ const [xi,yi]=pts[i],[xj,yj]=pts[j]; if((yi>y)!==(yj>y)&&x<(xj-xi)*(y-yi)/(yj-yi)+xi) c=!c; } return c; }
+function segDist(px,py,ax,ay,bx,by){ const dx=bx-ax, dy=by-ay, t=Math.max(0,Math.min(1,((px-ax)*dx+(py-ay)*dy)/(dx*dx+dy*dy||1))); return Math.hypot(px-ax-t*dx, py-ay-t*dy); }
+/* 구역과 길을 피해 나무를 흩뿌린다. 매번 같은 자리에 나오도록 좌표로 정한 값만 쓴다. */
+function mapTrees(){
+  const zones=ZONES.map(ptsOf), roads=ROADS.map(r=>r.split(' ').map(p=>p.split(',').map(Number))), out=[];
+  for(let x=24;x<1000;x+=34) for(let y=24;y<600;y+=34){
+    const h=Math.abs(Math.sin(x*12.9898+y*78.233)*43758.5453)%1; if(h>0.42) continue;
+    const px=x+(h*37%1-.5)*20, py=y+(h*91%1-.5)*20;
+    if(zones.some(p=>inPoly(px,py,p))||zones.some(p=>p.some(([zx,zy])=>Math.hypot(zx-px,zy-py)<14))) continue;
+    if(roads.some(r=>r.slice(1).some((b,i)=>segDist(px,py,r[i][0],r[i][1],b[0],b[1])<20))) continue;
+    if(SHELTERS.concat(DOORS,CAMS).some(s=>Math.hypot(s.x-px,s.y-py)<30)) continue;
+    out.push([px,py,5+h*14%5]);
+  }
+  return out;
+}
+/* 동물 모양: 위험 등급(맹수·주의·일반)마다 다르다. 색만으로 구분하지 않는다. */
+function animalShape(risk){
+  if(risk==='위험') return '<path class="ring" d="M0,-17 L17,0 L0,17 L-17,0 Z" fill="#0c1626" stroke-width="2.5"/>';
+  if(risk==='주의') return '<rect class="ring" x="-13" y="-13" width="26" height="26" rx="5" fill="#0c1626" stroke-width="2.5"/>';
+  return '<circle class="ring" r="14" fill="#0c1626" stroke-width="2.5"/>';
+}
 function buildMap(){
-  const m=$('#map');
-  let h='<g id="mRoads">'+ROADS.map(p=>'<polyline points="'+p+'" fill="none" stroke="#1f2d47" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>').join('')+'</g>';
-  h+='<g id="mZones">'+ZONES.map(z=>'<g class="zone" data-zone="'+z.id+'"><polygon id="zp-'+z.id+'" points="'+z.pts+'" fill="#14233b" stroke="#2c4168" stroke-width="1.5"/>'+
-     '<text x="'+z.cx+'" y="'+(z.cy-28)+'" text-anchor="middle" font-size="14" font-weight="600" fill="#e7edf7">'+z.name+'</text>'+
-     '<text id="zt-'+z.id+'" x="'+z.cx+'" y="'+(z.cy-10)+'" text-anchor="middle" font-size="12" fill="#8d9ab4"></text></g>').join('')+'</g>';
+  const m=$('#map'), t=(x,y,s,size,weight,fill)=>'<text x="'+x+'" y="'+y+'" text-anchor="middle" font-size="'+size+'" font-weight="'+weight+'" fill="'+fill+'" stroke="'+MAPC.halo+'" stroke-width="3" paint-order="stroke">'+s+'</text>';
+  let h='<rect width="1000" height="600" fill="'+MAPC.ground+'"/>';
+  h+='<g id="mTrees">'+mapTrees().map(([x,y,r])=>'<circle cx="'+x.toFixed(1)+'" cy="'+y.toFixed(1)+'" r="'+r.toFixed(1)+'" fill="'+MAPC.tree+'"/><circle cx="'+(x-r*.3).toFixed(1)+'" cy="'+(y-r*.3).toFixed(1)+'" r="'+(r*.45).toFixed(1)+'" fill="'+MAPC.treeHi+'"/>').join('')+'</g>';
+  h+='<g id="mRoads">'+ROADS.map(p=>'<polyline points="'+p+'" fill="none" stroke="'+MAPC.roadEdge+'" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>').join('')+
+     ROADS.map(p=>'<polyline points="'+p+'" fill="none" stroke="'+MAPC.road+'" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>').join('')+
+     ROADS.map(p=>'<polyline points="'+p+'" fill="none" stroke="'+MAPC.roadLine+'" stroke-width="1" stroke-dasharray="6 9"/>').join('')+'</g>';
+  h+='<g id="mZones">'+ZONES.map(z=>{
+    const k=ZONE_KIND[z.id]||'meadow', fill=MAPC[k]||MAPC.meadow;
+    const edge = k==='pen' ? '<polygon points="'+z.pts+'" fill="none" stroke="'+MAPC.fence+'" stroke-width="2" stroke-dasharray="1 5" stroke-linecap="round"/>'
+      : k==='water' ? '' : '';
+    const waves = k==='water' ? [0,1].map(i=>{ const y=z.cy+4+i*12, x0=z.cx-50; return '<path d="M'+x0+','+y+' q10,-6 20,0 t20,0 t20,0 t20,0 t20,0" fill="none" stroke="'+MAPC.waterEdge+'" stroke-width="1.5" opacity=".7"/>'; }).join('') : '';
+    return '<g class="zone" data-zone="'+z.id+'"><polygon id="zp-'+z.id+'" points="'+z.pts+'" fill="'+fill+'" stroke="'+(k==='water'?MAPC.waterEdge:k==='plaza'?MAPC.plazaEdge:'#3d5c44')+'" stroke-width="1.5"/>'+edge+waves+
+      '<polygon id="zh-'+z.id+'" points="'+z.pts+'" fill="transparent" pointer-events="none"/>'+
+      t(z.cx, z.cy-28, z.name, 14, 600, MAPC.label)+
+      '<text id="zt-'+z.id+'" x="'+z.cx+'" y="'+(z.cy-10)+'" text-anchor="middle" font-size="12" fill="#c9d3c2" stroke="'+MAPC.halo+'" stroke-width="3" paint-order="stroke"></text></g>';
+  }).join('')+'</g>';
   h+='<g id="mEvac"></g><g id="mFov"></g>';
-  h+='<g id="mFix">'+SHELTERS.map(s=>'<g><rect x="'+(s.x-9)+'" y="'+(s.y-9)+'" width="18" height="18" rx="3" fill="#e7edf7"/><text x="'+s.x+'" y="'+(s.y+4)+'" text-anchor="middle" font-size="11" font-weight="700" fill="#0a111e">H</text><text x="'+s.x+'" y="'+(s.y+24)+'" text-anchor="middle" font-size="11" fill="#8d9ab4">'+s.n+'</text></g>').join('')+
-     DOORS.map(d=>'<g><rect id="door-'+d.id+'" x="'+(d.x-14)+'" y="'+(d.y-8)+'" width="28" height="16" rx="3" fill="#0c1626" stroke="#e7edf7" stroke-width="1.5"/><text id="doort-'+d.id+'" x="'+d.x+'" y="'+(d.y+24)+'" text-anchor="middle" font-size="11" fill="#8d9ab4">'+d.n+'</text></g>').join('')+
-     CAMS.map(c=>'<g class="mk" data-cam="'+c.id+'"><rect id="cm-'+c.id+'" x="'+(c.x-7)+'" y="'+(c.y-5)+'" width="14" height="10" rx="2" fill="#0c1626" stroke="#8d9ab4" stroke-width="1.5"/><title>'+c.id+' '+c.name+'</title></g>').join('')+'</g>';
-  h+='<g id="mStaff"></g><g id="mGps">'+S.animals.map(a=>'<g class="mk" id="am-'+a.id+'" data-animal="'+a.id+'"><circle class="ring" r="15" fill="#0c1626" stroke-width="2.5"/><text text-anchor="middle" y="5" font-size="13" font-weight="700" fill="#e7edf7">'+a.mk+'</text><title>'+a.sp+' '+a.nm+'</title></g>').join('')+'</g>';
+  h+='<g id="mFix">'+SHELTERS.map(s=>'<g><title>'+s.n+' (대피 건물)</title><rect x="'+(s.x-11)+'" y="'+(s.y-6)+'" width="22" height="15" rx="2" fill="'+MAPC.wall+'"/>'+
+      '<path d="M'+(s.x-14)+','+(s.y-5)+' L'+s.x+','+(s.y-15)+' L'+(s.x+14)+','+(s.y-5)+' Z" fill="'+MAPC.roof+'"/><rect x="'+(s.x-3)+'" y="'+(s.y+1)+'" width="6" height="8" fill="#5a4630"/>'+
+      t(s.x, s.y+24, s.n, 11, 400, '#c9d3c2')+'</g>').join('')+
+    DOORS.map(d=>'<g><title>'+d.n+'</title><rect x="'+(d.x-15)+'" y="'+(d.y-10)+'" width="4" height="20" fill="'+MAPC.wall+'"/><rect x="'+(d.x+11)+'" y="'+(d.y-10)+'" width="4" height="20" fill="'+MAPC.wall+'"/>'+
+      '<rect id="door-'+d.id+'" x="'+(d.x-11)+'" y="'+(d.y-3)+'" width="22" height="6" rx="1" fill="#0c1626" stroke="'+MAPC.wall+'" stroke-width="1.5"/>'+
+      '<text id="doort-'+d.id+'" x="'+d.x+'" y="'+(d.y+26)+'" text-anchor="middle" font-size="11" fill="#c9d3c2" stroke="'+MAPC.halo+'" stroke-width="3" paint-order="stroke">'+d.n+'</text></g>').join('')+
+    CAMS.map(c=>{ const z=Z(c.zone), a=Math.atan2(z.cy-c.y, z.cx-c.x)*180/Math.PI;
+      return '<g class="mk" data-cam="'+c.id+'"><title>'+c.id+' '+c.name+(c.live?' (실영상)':' (모의)')+'</title>'+
+        '<circle id="ce-'+c.id+'" cx="'+c.x+'" cy="'+c.y+'" r="13" fill="none" stroke="'+MAPC.crit+'" stroke-width="2.5" class="pulse" visibility="hidden"/>'+
+        '<g transform="translate('+c.x+' '+c.y+') rotate('+a.toFixed(1)+')"><rect id="cm-'+c.id+'" x="-8" y="-5" width="12" height="10" rx="2" stroke-width="1.5"/>'+
+        '<path id="cl-'+c.id+'" d="M4,-3 L10,-6 L10,6 L4,3 Z" stroke-width="1.2"/></g>'+
+        '<g id="cb-'+c.id+'" visibility="hidden"><circle cx="'+(c.x+11)+'" cy="'+(c.y-10)+'" r="7" fill="'+MAPC.crit+'"/><text id="cbt-'+c.id+'" x="'+(c.x+11)+'" y="'+(c.y-6.5)+'" text-anchor="middle" font-size="9.5" font-weight="700" fill="#fff"></text></g></g>';
+    }).join('')+'</g>';
+  h+='<g id="mStaff"></g><g id="mGps">'+S.animals.map(a=>'<g class="mk" id="am-'+a.id+'" data-animal="'+a.id+'"><title>'+a.sp+' '+a.nm+' (모의 위치)</title>'+
+      '<circle r="21" fill="none" stroke="'+MAPC.mock+'" stroke-width="1.2" stroke-dasharray="3 3" opacity=".75"/>'+animalShape(a.risk)+
+      '<text text-anchor="middle" y="5" font-size="13" font-weight="700" fill="#e7edf7">'+a.mk+'</text>'+
+      '<g class="bang" visibility="hidden"><circle cx="13" cy="-13" r="7" fill="'+MAPC.crit+'" stroke="#0c1626" stroke-width="1.5"/><text x="13" y="-9.5" text-anchor="middle" font-size="11" font-weight="800" fill="#fff">!</text></g></g>').join('')+'</g>';
   m.innerHTML=h; m._built=true;
 }
-function renderMap(){
+function renderMap2d(){
   const m=$('#map'); if(!m._built) buildMap();
   const r=related(), L=S.layers;
   ZONES.forEach(z=>{
-    const g=grade(z.id), p=$('#zp-'+z.id);
-    p.setAttribute('fill', L.heat ? (g[1]==='crit'?'rgba(255,95,95,.28)':g[1]==='warn'?'rgba(242,179,61,.22)':'#14233b') : '#14233b');
-    p.setAttribute('stroke', r.zone===z.id?'#e7edf7':(z.id==='hill'&&S.hillIntrude?'#f2b33d':'#2c4168'));
-    p.setAttribute('stroke-width', r.zone===z.id?3:1.5);
-    p.setAttribute('stroke-dasharray', L.heat&&g[1]!=='ok'?'6 4':'');
+    const g=grade(z.id), hz=$('#zh-'+z.id), p=$('#zp-'+z.id);
+    hz.setAttribute('fill', L.heat ? (g[1]==='crit'?'rgba(255,95,95,.32)':g[1]==='warn'?'rgba(242,179,61,.22)':'transparent') : 'transparent');
+    hz.setAttribute('stroke', L.heat&&g[1]!=='ok' ? (g[1]==='crit'?MAPC.crit:MAPC.warn) : 'none');
+    hz.setAttribute('stroke-dasharray', '6 4');
+    p.setAttribute('stroke-width', r.zone===z.id?3.5:1.5);
+    p.style.stroke = r.zone===z.id ? '#ffffff' : (z.id==='hill'&&S.hillIntrude ? MAPC.warn : '');
     $('#zt-'+z.id).textContent = L.heat ? '관람객 약 '+Math.round(S.zones[z.id])+'명 · '+g[0] : '';
   });
   $('#mZones').style.display = L.terrain?'':'none'; $('#mRoads').style.display = L.terrain?'':'none';
@@ -711,16 +781,28 @@ function renderMap(){
   const fc = r.cam && CAMS.find(c=>c.id===r.cam);
   setHTML($('#mFov'), fc ? (()=>{ const z=Z(fc.zone), dx=z.cx-fc.x, dy=z.cy-fc.y, n=Math.hypot(dx,dy), px=-dy/n*70, py=dx/n*70;
     return '<polygon points="'+fc.x+','+fc.y+' '+(z.cx+px)+','+(z.cy+py)+' '+(z.cx-px)+','+(z.cy-py)+'" fill="rgba(76,157,255,.16)" stroke="#4c9dff" stroke-width="1"/>'; })() : '');
-  CAMS.forEach(c=>{ const e=$('#cm-'+c.id); e.setAttribute('stroke', r.cam===c.id?'#4c9dff':S.camState[c.id]?'#f2b33d':'#8d9ab4'); e.setAttribute('fill', r.cam===c.id?'#4c9dff':'#0c1626'); });
-  DOORS.forEach(d=>{ $('#door-'+d.id).setAttribute('fill', S.doorsClosed?'#ff5f5f':'#0c1626'); $('#doort-'+d.id).textContent = d.n+(S.doorsClosed?' (폐쇄)':''); });
+  /* 카메라: 실영상은 채운 파랑, 모의는 점선 회색. 진행 중인 실제 사건이 있으면 빨간 원과 건수 배지. */
+  const active={}; (LIVE.on?LIVE.events:[]).forEach(e=>{ if(e.raw.active&&e.status!=='false') active[e.raw.camera_id]=(active[e.raw.camera_id]||0)+1; });
+  CAMS.forEach(c=>{
+    const body=$('#cm-'+c.id), lens=$('#cl-'+c.id), live=!!(c.live&&LIVE.on), n=c.live?active[c.live]||0:0, sel=r.cam===c.id, delay=S.camState[c.id];
+    const col = sel ? '#e7edf7' : delay ? MAPC.warn : live ? MAPC.live : MAPC.mock;
+    [body,lens].forEach(e=>{ e.setAttribute('fill', live||sel ? col : '#0c1626'); e.setAttribute('stroke', live&&!sel ? '#e7edf7' : col); e.setAttribute('stroke-dasharray', live||sel ? '' : '2 2'); });
+    $('#ce-'+c.id).setAttribute('visibility', n||(live&&camAlarm(c.id)) ? 'visible' : 'hidden');
+    $('#cb-'+c.id).setAttribute('visibility', n ? 'visible' : 'hidden'); $('#cbt-'+c.id).textContent = n>9?'9+':n||'';
+  });
+  DOORS.forEach(d=>{ const b=$('#door-'+d.id); b.setAttribute('fill', S.doorsClosed?MAPC.crit:'#0c1626'); b.setAttribute('stroke', S.doorsClosed?MAPC.crit:MAPC.wall); $('#doort-'+d.id).textContent = d.n+(S.doorsClosed?' (폐쇄)':''); });
   $('#mGps').style.display = L.gps?'':'none';
   S.animals.forEach(a=>{ const e=$('#am-'+a.id), al=animalAlarm(a);
     e.setAttribute('transform','translate('+a.pos.x.toFixed(1)+' '+a.pos.y.toFixed(1)+')');
     e.setAttribute('class','mk'+(r.animal===a.id?' sel':'')+(al?' alarm':''));
-    e.querySelector('.ring').setAttribute('stroke', r.animal===a.id?'#e7edf7':al?'#ff5f5f':a.temp==null?'#5f6d89':'#4c9dff');
+    e.querySelector('.ring').setAttribute('stroke', r.animal===a.id?'#e7edf7':al?MAPC.crit:a.temp==null?'#5f6d89':MAPC.live);
+    e.querySelector('.bang').setAttribute('visibility', al?'visible':'hidden');
   });
-  setHTML($('#mStaff'), (L.staff||S.em) ? S.staff.map(s=>'<g><rect x="'+(s.x-6)+'" y="'+(s.y-6)+'" width="12" height="12" rx="2" fill="#3ecf8e"/><text x="'+(s.x+10)+'" y="'+(s.y+4)+'" font-size="11" fill="#8d9ab4">'+s.n+'</text></g>').join('')+
-    S.teams.map(t=>'<g><rect x="'+(t.x-8).toFixed(1)+'" y="'+(t.y-8).toFixed(1)+'" width="16" height="16" rx="3" fill="#f2b33d"/><text x="'+(t.x+12).toFixed(1)+'" y="'+(t.y+4).toFixed(1)+'" font-size="12" font-weight="600" fill="#f2b33d">'+t.n+'</text></g>').join('') : '');
+  /* 현장 인력·대응조는 모의 위치라 점선 테두리 안에 사람 모양으로 그린다. */
+  const person=(x,y,col,name,size)=>'<g><circle cx="'+x.toFixed(1)+'" cy="'+y.toFixed(1)+'" r="'+(size+3)+'" fill="#0c1626" stroke="'+col+'" stroke-width="1.2" stroke-dasharray="2 2"/>'+
+    '<circle cx="'+x.toFixed(1)+'" cy="'+(y-size*.35).toFixed(1)+'" r="'+(size*.32).toFixed(1)+'" fill="'+col+'"/><path d="M'+(x-size*.55).toFixed(1)+','+(y+size*.6).toFixed(1)+' q'+(size*.55).toFixed(1)+','+(-size*.9).toFixed(1)+' '+(size*1.1).toFixed(1)+',0 Z" fill="'+col+'"/>'+
+    '<text x="'+(x+size+7).toFixed(1)+'" y="'+(y+4).toFixed(1)+'" font-size="11" fill="'+col+'" stroke="'+MAPC.halo+'" stroke-width="3" paint-order="stroke">'+name+'</text></g>';
+  setHTML($('#mStaff'), (L.staff||S.em) ? S.staff.map(s=>person(s.x,s.y,MAPC.ok,s.n,7)).join('')+S.teams.map(t=>person(t.x,t.y,MAPC.warn,t.n,8)).join('') : '');
   update3d();
 }
 /* ---------- 3D map (R4): 안내도 PDF를 바닥에 깔고 구역·건물·카메라·사건을 단순 입체로 그린다 ----------
