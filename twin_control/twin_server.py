@@ -356,8 +356,7 @@ def create_app(zj, engine, args, accounts):
                 engine.db.decision(jid, 'batch_completed', response)
                 streak = 0
             except Exception as exc:
-                message = ('HTTP ' + str(exc.code) if isinstance(exc, urllib.error.HTTPError)
-                           else type(exc).__name__)
+                message = twin_ai.describe_error(exc, ai_args.jev_timeout)[1]
                 try:
                     engine.db.decision(jid, 'batch_error', error=message)
                 except Exception:
@@ -442,7 +441,8 @@ def create_app(zj, engine, args, accounts):
                     pump_ms=round(sorted(pump_ms)[len(pump_ms) // 2], 1) if pump_ms else None,
                     events=with_ai(rows[-EVENT_LIMIT:]),
                     unacked=engine.db.unacked_count(),
-                    ai=dict(live=live_ai, model=ai_args.jev_model, job=dict(job)))
+                    ai=dict(live=live_ai, model=ai_args.jev_model, job=dict(job),
+                            health=engine.worker.snapshot() if live_ai and hasattr(engine.worker, 'snapshot') else None))
 
     auth_on = bool(accounts.users())
     sessions, session_lock, failures = {}, threading.Lock(), {}
@@ -714,6 +714,17 @@ def create_app(zj, engine, args, accounts):
         if targets:
             threading.Thread(target=run_batch, args=(day, targets, rows), daemon=True, name='ai-batch').start()
         return snapshot
+
+    @app.post('/api/ai/retry')
+    async def ai_retry(request: Request):
+        """판단 AI 탭의 '다시 시도'. 재시도 간격을 기다리지 않고 바로 다시 연결해 본다."""
+        if not local_origin(request.headers):
+            raise HTTPException(403, '이 관제 화면에서만 요청할 수 있습니다.')
+        need(request, *ROLES)
+        if not (live_ai and hasattr(engine.worker, 'retry_now')):
+            raise HTTPException(409, '실시간 판단이 꺼져 있습니다 (서버를 --ollama로 실행하면 켜짐).')
+        engine.worker.retry_now()
+        return engine.worker.snapshot()
 
     @app.get('/api/ai/decisions')
     def ai_decisions(day: str = '', sent_only: bool = True):

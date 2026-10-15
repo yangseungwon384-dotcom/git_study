@@ -187,6 +187,9 @@ body.em .grid{grid-template-columns:260px minmax(0,1fr) 350px}
 .tbl tbody tr:hover{background:var(--panel-2)}
 .csv-sum{display:flex;flex-wrap:wrap;gap:6px 18px;color:var(--muted);font-size:12.5px}
 .csv-sum b{color:var(--fg)}
+.ai-health{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;padding:8px 12px;border:1px solid var(--line-2);border-radius:var(--r);background:var(--panel);font-size:12.5px;color:var(--muted)}
+.ai-health b{color:var(--fg)}
+.ai-health .badge{font-weight:700;padding:2px 9px;border-radius:999px;border:1px solid currentColor}
 a.btn{text-decoration:none;display:inline-block}
 a.btn[aria-disabled="true"]{opacity:.45;pointer-events:none}
 .btn.rv{margin-right:4px;color:var(--muted)}
@@ -257,6 +260,7 @@ a.btn[aria-disabled="true"]{opacity:.45;pointer-events:none}
         <span class="sp"></span>
         <button class="btn" id="aiReload">새로고침</button>
       </div>
+      <div class="ai-health" id="aiHealth" role="status" aria-live="polite"></div>
       <div class="csv-sum" id="aiSum"></div>
       <div class="ai-list" id="aiList"></div>
     </div>
@@ -477,7 +481,7 @@ function connect(){
   let ws; try{ ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws'); }catch(err){ return; }
   ws.onmessage = m => {
     const d=JSON.parse(m.data), first=!LIVE.on;
-    LIVE.on=true; LIVE.cams=d.cameras; LIVE.boot=d.boot_error; LIVE.ai=d.ai||null; LIVE.me=d.me||null;
+    LIVE.on=true; LIVE.cams=d.cameras; LIVE.boot=d.boot_error; LIVE.ai=d.ai||null; LIVE.me=d.me||null; renderAiHealth();
     $('#meBox').hidden=!(LIVE.me&&LIVE.me.login); if(LIVE.me) $('#meName').textContent=LIVE.me.name+' ('+(LIVE.me.role==='admin'?'관리자':'관제요원')+')'; LIVE.events=d.events.map(liveToEvent);
     LIVE.alarm=new Set(LIVE.events.filter(e=>e.raw.active&&e.status!=='false'&&e.animal).map(e=>e.animal));
     const shift=d.now_sec-S.t;
@@ -1154,7 +1158,7 @@ function renderCsv(){
 const AIV = {day:today(), recs:[], total:0, state:'idle', tick:0, open:new Set()};
 const MODE_KO = {live:'실시간', batch:'일괄 판단', eval:'채점'};
 const AISTATUS_KO = {completed:'답 받음', stale:'답 받음 (사건이 먼저 끝남)', batch_completed:'답 받음', eval_completed:'답 받음',
-  pending:'대기 중', running:'판단 중', batch_running:'판단 중', error:'오류', unavailable:'연결 실패', batch_error:'오류',
+  pending:'대기 중', running:'판단 중', batch_running:'판단 중', error:'오류', unavailable:'연결 실패로 보내지 못함', batch_error:'오류',
   disabled:'보내지 않음', superseded:'새 요청으로 대체됨', queue_full:'대기열이 가득 차 버려짐', interrupted:'서버 재시작으로 중단'};
 const RELATION_KO = {inside:'구역 안', outside:'구역 밖', bottom_edge:'화면 맨 아래'};
 const aiStatus = r => r.status==='stale'&&!r.answer ? '사건이 먼저 끝나 보내지 않음' : AISTATUS_KO[r.status]||r.status;
@@ -1213,8 +1217,31 @@ function aiRecord(r){
     '<details data-airec="'+esc(r.id)+'"'+(AIV.open.has(r.id)?' open':'')+'><summary>AI에 보낸 정보 보기</summary>'+aiFacts(r.state)+
     '<pre>'+esc(JSON.stringify(r.state,null,2))+'</pre></details></article>';
 }
+/* R6: 실시간 판단 연결 상태. 서버가 0.5초마다 보내는 ai.health로 그린다. */
+const AIH = {busy:false, msg:''};
+function renderAiHealth(){
+  if(VIEW!=='ai') return;
+  const ai=LIVE.on?LIVE.ai:null, h=ai&&ai.health, t=v=>v?esc(String(v).slice(11,19)):'없음';
+  let html;
+  if(!LIVE.on) html='<span>분석 서버에 연결되어 있지 않습니다.</span>';
+  else if(!ai||!ai.live||!h) html='<span class="badge s-dim">실시간 판단 꺼짐</span><span>서버를 --ollama로 실행하면 진행 중인 사건마다 판단을 받습니다. CSV 기록 탭의 일괄 판단은 쓸 수 있습니다.</span>';
+  else {
+    const lat=h.latency_ms!=null?'<span>응답 시간 중앙 <b class="num">'+(h.latency_ms/1000).toFixed(1)+'초</b> (최근 '+h.latency_n+'건, 최대 '+(h.latency_max_ms/1000).toFixed(1)+'초)</span>':'';
+    const common='<span>대기열 <b class="num">'+h.queue+'건</b></span><span>마지막 성공 <b class="num">'+t(h.last_ok)+'</b></span>'+lat+
+      (h.late_answers?'<span>사건이 끝난 뒤 붙은 답 <b class="num">'+h.late_answers+'건</b></span>':'');
+    if(h.status==='ok') html='<span class="badge s-ok">● 정상</span><span>모델 '+esc(ai.model)+'</span>'+common;
+    else if(h.status==='connecting') html='<span class="badge" style="color:var(--accent)">◌ 연결 확인 중</span><span>모델 '+esc(ai.model)+'</span>'+common;
+    else html='<span class="badge s-crit">▲ 오류</span><span><b>'+esc(h.reason)+'</b></span><span>연속 실패 <b class="num">'+h.failures+'번</b> · '+
+      (h.retry_in?'<b class="num">'+h.retry_in+'초</b> 뒤 자동으로 다시 시도':'곧 다시 시도')+'</span>'+common+
+      '<span>요청은 버리지 않고 보관합니다. 규칙 경고는 그대로 동작합니다.</span>';
+    html+='<span class="sp" style="flex:1"></span>'+(AIH.msg?'<span>'+esc(AIH.msg)+'</span>':'')+
+      '<button class="btn sm" id="aiRetry"'+(AIH.busy?' disabled':'')+'>지금 다시 시도</button>';
+  }
+  setHTML($('#aiHealth'), html);
+}
 function renderAi(){
   if(VIEW!=='ai') return;
+  renderAiHealth();
   const mode=$('#aiMode').value, choice=$('#aiChoice').value, q=$('#aiQ').value.trim().toLowerCase();
   const all=AIV.recs, ans=all.filter(r=>r.answer);
   const recs=all.filter(r=>(!mode||r.mode===mode)&&(!choice||(r.answer&&r.answer.choice===choice))&&
@@ -1490,6 +1517,12 @@ $('#aiDay').addEventListener('change',e=>{ AIV.day=e.target.value||today(); e.ta
 $('#aiQ').addEventListener('input',renderAi);
 $('#aiAll').addEventListener('change',loadAi);
 $('#aiReload').addEventListener('click',loadAi);
+$('#aiHealth').addEventListener('click',e=>{
+  if(!e.target.closest('#aiRetry')||AIH.busy) return;
+  AIH.busy=true; AIH.msg='다시 연결하는 중'; renderAiHealth();
+  post('/api/ai/retry').then(()=>{ AIH.msg='다시 시도를 요청했습니다'; }).catch(err=>{ AIH.msg='요청 실패: '+err.message; })
+    .finally(()=>{ AIH.busy=false; renderAiHealth(); setTimeout(()=>{ AIH.msg=''; renderAiHealth(); },5000); });
+});
 $('#aiList').addEventListener('toggle',e=>{ const id=e.target.dataset&&e.target.dataset.airec; if(!id) return; if(e.target.open) AIV.open.add(id); else AIV.open.delete(id); },true);
 $('#logout').addEventListener('click',()=>{ fetch('/api/logout',{method:'POST'}).then(toLogin,toLogin); });
 $('#csvAi').addEventListener('click',()=>{

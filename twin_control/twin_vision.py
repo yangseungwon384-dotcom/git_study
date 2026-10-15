@@ -505,6 +505,9 @@ def make_analyzer(zj):
             import dashboard_policy
             dashboard_policy.ObjectWatch = object_watch_class()
             self.exit_log = self.db.root / 'exit_diagnostics.jsonl'
+            # R6: 판단 요청 담당을 바꿔 끼운다 (실패 원인 구분, 자동 재시도, 늦은 답 붙이기). 스레드는 start()에서 켜진다.
+            import twin_ai
+            self.worker = twin_ai.make_worker(zj)(self)
 
         def gate_for(self, cid, name):
             return camera_gate(cid, name, super().gate_for(cid, name))
