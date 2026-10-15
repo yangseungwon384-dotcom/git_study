@@ -25,7 +25,8 @@ SOURCE = Path(r'C:\code\code_test\zoo')
 ANALYSIS_FPS = 3.0
 CACHE = HERE / 'replay_cache'
 # 'v1'(이전 규칙)으로 돌릴 때 빼는 카메라별 설정. 엔진 기본 규칙과 같아진다.
-RULE_KEYS = ('person_min', 'person_gate', 'person_anchor', 'exit_samples', 'exit_sec', 'boundary_norm')
+RULE_KEYS = ('person_min', 'person_gate', 'person_anchor', 'exit_samples', 'exit_sec', 'boundary_norm',
+             'species_hold', 'track_jump')
 
 
 def detections(cam, weights, width=960):
@@ -91,7 +92,7 @@ def replay(cam, data, cfg, rules, loops, start=0.0):
     events, static = [], twin_vision.StaticFilter()
     duration = data['duration']
     for loop in range(loops):
-        tracker, watches, last = zj.IoUTracker(), {}, {}
+        tracker, watches, last = twin_vision.make_tracker(rule_cam, zj), {}, {}
         for frame_index, frame in enumerate(data['frames']):
             if frame['t'] < start:
                 continue
@@ -129,6 +130,8 @@ def replay(cam, data, cfg, rules, loops, start=0.0):
                                        distance_px=round(signed, 1), margin_px=round(g.boundary_norm * min(w, h), 1),
                                        bbox=d['bbox'], foot=[round(fx), round(fy)], recent=list(s['samples']),
                                        delay=round(t - s['crossed'], 2) if s['crossed'] is not None else None))
+    if static.relabeled:
+        print(f'   [{rules}] 사람 → {cam["species"]} 되돌림 {static.relabeled}건')
     return events
 
 

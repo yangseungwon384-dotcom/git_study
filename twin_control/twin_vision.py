@@ -44,7 +44,12 @@ CAMERAS = (
          min_conf=0.45, proxy=False, static_filter=True, exit_samples=EXIT_SAMPLES, exit_sec=EXIT_SEC, boundary_norm=None),
     dict(cam_id='ZOO_CAM_GIRAFFE_01', code='CAMERA 02', title='기린 관람 구역', desc='관람객 안전선 · 구역 감시',
          file='giraffe_cctv.mp4', species='giraffe', label='기린', classes=('giraffe',),
-         min_conf=0.25, proxy=False, static_filter=False),
+         min_conf=0.25, proxy=False, static_filter=False,
+         # R3 (2026-10-15): 서 있는 기린이 사람으로 잡혔다 (신뢰도 최대 0.67). 사람 기준을 0.70으로 올리고,
+         # 최근 2초 안에 기린이 있던 자리와 겹치는 사람 박스는 기린으로 본다.
+         person_min=0.70, species_hold=dict(sec=2.0, iou=0.3),
+         # 뛰는 기린은 초당 3장 사이에 박스가 겹치지 않아 추적이 새로 시작됐다. 가까운 곳에서 1초 안에 다시 잡히면 잇는다.
+         track_jump=dict(missed=3, scale=1.5)),
     dict(cam_id='ZOO_CAM_TIGER_01', code='CAMERA 03', title='호랑이 방사장', desc='맹수 경계 · 이동 감시',
          file='tiger_cctv.mp4', species='tiger', label='호랑이 추정',
          classes=('zebra', 'giraffe', 'cow', 'sheep', 'horse', 'cat', 'dog', 'bear'),
@@ -132,6 +137,50 @@ def anchor_point(cam, name, bbox, h):
     return (x1 + x2) / 2, min(float(y2), h - 1)
 
 
+_TRACKERS = {}
+
+
+def make_tracker(cam, zj):
+    """카메라에 맞는 추적기. track_jump가 있으면 겹치지 않아도 가까이 다시 잡힌 박스를 같은 추적으로 잇는다."""
+    jump = (cam or {}).get('track_jump')
+    if not jump:
+        return zj.IoUTracker()
+    if zj not in _TRACKERS:
+        class JumpTracker(zj.IoUTracker):
+            def __init__(self, missed, scale):
+                super().__init__()
+                self.jump_missed, self.jump_scale = missed, scale
+
+            def update(self, detections):
+                before = {tid: dict(t) for tid, t in self.tracks.items()}
+                first_new = self.next_id
+                out = super().update(detections)
+                pairs = []
+                for det in out:
+                    if det['track_id'] < first_new:
+                        continue
+                    cx, cy = (det['bbox'][0] + det['bbox'][2]) / 2, (det['bbox'][1] + det['bbox'][3]) / 2
+                    for tid, old in before.items():
+                        now = self.tracks.get(tid)
+                        if old['name'] != det['name'] or not now or now['missed'] == 0 or now['missed'] > self.jump_missed:
+                            continue
+                        b = old['bbox']
+                        dist = ((cx - (b[0] + b[2]) / 2) ** 2 + (cy - (b[1] + b[3]) / 2) ** 2) ** 0.5
+                        if dist <= self.jump_scale * max(b[2] - b[0], b[3] - b[1]):
+                            pairs.append((dist, tid, det))
+                used = set()
+                for dist, tid, det in sorted(pairs, key=lambda p: p[0]):
+                    if tid in used or det['track_id'] in used:
+                        continue
+                    used.update((tid, det['track_id']))
+                    del self.tracks[det['track_id']]
+                    self.tracks[tid].update(bbox=det['bbox'], missed=0)
+                    det['track_id'] = tid
+                return out
+        _TRACKERS[zj] = JumpTracker
+    return _TRACKERS[zj](**jump)
+
+
 def label_of(name):
     return LABELS.get(name, name)
 
@@ -165,6 +214,8 @@ class StaticFilter:
 
     def __init__(self):
         self.anchors = []
+        self.species = []        # 최근 동물 박스 (mono, bbox). species_hold 카메라에서 사람 오판을 되돌릴 때 쓴다
+        self.relabeled = 0       # 사람 → 동물로 되돌린 박스 수 (진단용)
 
     def observe(self, bbox, confidence, mono):
         """이 박스를 기록하고, 정지 물체로 보고 빼야 하면 True."""
@@ -185,8 +236,18 @@ class StaticFilter:
 def post_process(cam, raw, static, mono):
     """raw는 (YOLO 클래스명, 신뢰도, [x1, y1, x2, y2])의 목록. (남길 것, 정지 물체로 뺀 박스)를 돌려준다."""
     merged = []
+    hold = cam.get('species_hold')
+    if hold:
+        static.species = [(t, b) for t, b in static.species if mono - t <= hold['sec']]
+        here = [bbox for name, confidence, bbox in raw if name in cam['classes'] and confidence >= cam['min_conf']]
+        recent = [b for _, b in static.species] + here
+        static.species += [(mono, b) for b in here]
     for name, confidence, bbox in raw:
-        if name == PERSON:
+        if name == PERSON and hold and any(box_iou(b, bbox) >= hold['iou'] for b in recent):
+            # 같은 자리에 방금까지 동물이 있었다: 같은 개체를 한두 장 사람으로 잘못 본 것으로 본다
+            static.relabeled += 1
+            merged.append((cam['species'], confidence, bbox))
+        elif name == PERSON:
             if confidence >= cam.get('person_min', PERSON_MIN):
                 merged.append((PERSON, confidence, bbox))
         elif name in cam['classes']:
@@ -330,6 +391,14 @@ def render_all(engine, box_note_sec):
     return out
 
 
+def left_safe(samples, stamp):
+    """samples: [(mono, conf, side)]. 마지막 안전 관측 다음의 첫 관측이 알림 시각보다 몇 초 전인지. 안전 관측이 없으면 None."""
+    last_safe = max((i for i, x in enumerate(samples) if x[2] == 'safe'), default=None)
+    if last_safe is None or last_safe + 1 >= len(samples):
+        return None
+    return round(stamp - samples[last_safe + 1][0], 2)
+
+
 def make_analyzer(zj):
     """엔진의 LinkedAnalyzer에서 모델과 화면 그리기만 바꾼 분석기."""
 
@@ -368,6 +437,10 @@ def make_analyzer(zj):
                            video_sec=round(video_sec, 2), bbox=d['bbox'], foot=[round(fx), round(fy)],
                            distance_px=round(float(cv2.pointPolygonTest(poly, (float(fx), float(fy)), True)), 1) if poly is not None else None,
                            margin_px=round(gate.boundary_norm * min(w, h), 1),
+                           box_wh=[d['bbox'][2] - d['bbox'][0], d['bbox'][3] - d['bbox'][1]],
+                           track_sec=round(stamp - s['watch'].samples[0][0], 2) if s['watch'].samples else None,
+                           # R3 I5: 마지막으로 안전 쪽에서 보인 뒤 처음 경계·위험 쪽에서 보인 시각 (알림 시각 기준 몇 초 전)
+                           left_safe_sec=left_safe(s['watch'].samples, stamp),
                            recent=[dict(sec=round(t - stamp, 2), conf=round(c, 2), side=side)
                                    for t, c, side in s['watch'].samples[-6:]])
                 with open(self.exit_log, 'a', encoding='utf-8') as handle:
@@ -383,6 +456,9 @@ def make_analyzer(zj):
 
         def detect(self, r, frame, session, cfg):
             self.detector().camera = r['cam']['cam_id']
+            cam = BY_ID.get(r['cam']['cam_id'])
+            if cam and cam.get('track_jump') and type(r['box_tracker']) is zj.IoUTracker:
+                r['box_tracker'] = make_tracker(cam, zj)
             detections = super().detect(r, frame, session, cfg)
             return self.rejudge_people(r, frame, cfg, detections)
 
