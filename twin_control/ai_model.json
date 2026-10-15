@@ -1,0 +1,5 @@
+{
+  "model": "tev1:0.8b",
+  "questions": "guided",
+  "note": "실시간·일괄 판단에 쓰는 Ollama 모델과 질문 문구. 바꾸면 서버를 다시 켜야 적용된다. 서버를 --jev-model로 실행하면 그 값이 우선한다. questions: engine(엔진 원래 문구) / fixed(웹 주소 버그를 뺀 문구) / guided(fixed + 위치 단서 읽는 기준). 되돌리기: model을 tev1:0.8b로 바꾸고 서버를 다시 켠다."
+}

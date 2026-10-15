@@ -5,7 +5,9 @@
 
 정답 기준 (docs/ai_rule.md의 R8 절):
   기린 사건: 기린은 영상 13.7초에 펜스를 넘어 영상 끝까지 구역 밖에 있다 → 13.7초 이후 BOUNDARY_CONCERN
-  코끼리 오탐 (v2 이전, 2026-10-15 10:07 전 요청): 코끼리는 영상 내내 울타리 안이었다 (R1 분석) → NORMAL
+  코끼리 오탐: 코끼리는 영상 내내 울타리 안이었다 (R1 분석) → NORMAL.
+    --since 이후 geometry가 있는 코끼리 요청(v1 규칙으로 다시 만든 오탐)을 쓰고, 없으면 v2 이전 기록(10:07 전)을 쓴다.
+질문 'engine'은 엔진 원래 문구, 'fixed'는 웹 주소 버그를 뺀 문구, 'guided'는 fixed + 위치 단서 기준 (twin_ai.questions_for).
 입력 'base'는 엔진 원래 요약, 'geometry'는 v9 후보가 덧붙인 evidence.geometry를 포함한 요약이다.
 """
 import argparse
@@ -43,9 +45,14 @@ def eval_set(data_dir, size, since, negatives):
     giraffe = [x for x in giraffe if 'geometry' in x[1]['evidence'] and x[1]['subject']['detected_class'] != 'person']
     elephant = [(rid, json.loads(js)) for rid, js in db.execute(
         "SELECT d.id, d.state_json FROM decisions d JOIN events e ON e.id = d.event_id "
-        "WHERE e.camera = 'ZOO_CAM_ELEPHANT_01' AND d.state_json IS NOT NULL "
-        "AND d.requested_at >= '2026-10-15' AND d.requested_at < '2026-10-15T10:07' ORDER BY d.rowid")]
-    elephant = [x for x in elephant if x[1]['subject']['detected_class'] != 'person']
+        "WHERE e.camera = 'ZOO_CAM_ELEPHANT_01' AND d.state_json IS NOT NULL AND d.requested_at >= ? ORDER BY d.rowid", (since,))]
+    elephant = [x for x in elephant if x[1]['subject']['detected_class'] != 'person' and 'geometry' in x[1]['evidence']]
+    if not elephant:
+        elephant = [(rid, json.loads(js)) for rid, js in db.execute(
+            "SELECT d.id, d.state_json FROM decisions d JOIN events e ON e.id = d.event_id "
+            "WHERE e.camera = 'ZOO_CAM_ELEPHANT_01' AND d.state_json IS NOT NULL "
+            "AND d.requested_at >= '2026-10-15' AND d.requested_at < '2026-10-15T10:07' ORDER BY d.rowid")]
+        elephant = [x for x in elephant if x[1]['subject']['detected_class'] != 'person']
     chosen = pick(sorted(giraffe, key=lambda x: x[1]['source']['video_position_sec']), size) + pick(elephant, negatives)
     return [dict(id=rid, state=st, label=label(st)) for rid, st in chosen]
 
@@ -55,9 +62,10 @@ def strip(state):
     return out
 
 
-def ask(url, model, state, timeout):
+def ask(url, model, state, timeout, mode='engine'):
     import zoo_vision_jev_new as zj
-    body = json.dumps({'model': model, 'state': state, 'questions': zj.questions(False)}, ensure_ascii=False).encode()
+    import twin_ai
+    body = json.dumps({'model': model, 'state': state, 'questions': twin_ai.questions_for(zj, mode)}, ensure_ascii=False).encode()
     req = urllib.request.Request(url.rstrip('/') + '/v1/systemone', data=body, method='POST',
                                  headers={'Content-Type': 'application/json'})
     started = time.monotonic()
@@ -82,6 +90,7 @@ def main():
     parser.add_argument('--negatives', type=int, default=10, help='평상시가 정답인 코끼리 오탐 사건 수')
     parser.add_argument('--models', nargs='+', default=['tev1:0.8b'])
     parser.add_argument('--inputs', nargs='+', default=['base', 'geometry'])
+    parser.add_argument('--questions', nargs='+', default=['engine'], help='engine / fixed / guided')
     parser.add_argument('--ollama-url', default='http://127.0.0.1:11434')
     parser.add_argument('--timeout', type=float, default=120)
     parser.add_argument('--set-out', type=Path)
@@ -103,17 +112,17 @@ def main():
                             g.get('foot_outside_distance_ratio'), g.get('track_observed_sec'),
                             g.get('sec_since_last_seen_inside'), c['label']])
     rows = []
-    print(f"{'모델':18s} {'입력':9s} {'정답률':>6s} {'이탈맞힘':>8s} {'평상시맞힘':>9s} {'정답확률':>8s} {'이탈확률(이탈)':>12s} {'이탈확률(평상시)':>14s} {'1순위확률':>9s} {'응답중앙':>8s} {'메모리':>8s}", flush=True)
+    print(f"{'모델':18s} {'질문':7s} {'입력':9s} {'정답률':>6s} {'이탈맞힘':>8s} {'평상시맞힘':>9s} {'정답확률':>8s} {'이탈확률(이탈)':>12s} {'이탈확률(평상시)':>14s} {'1순위확률':>9s} {'응답중앙':>8s} {'메모리':>8s}", flush=True)
     for model in args.models:
         ask(args.ollama_url, model, strip(cases[0]['state']), args.timeout)   # 모델 올리기 (측정에서 뺌)
         size = loaded_size(args.ollama_url, model)
-        for kind in args.inputs:
+        for mode, kind in [(m, k) for m in args.questions for k in args.inputs]:
             res = []
             for c in cases:
                 st = c['state'] if kind == 'geometry' else strip(c['state'])
-                a, ms = ask(args.ollama_url, model, st, args.timeout)
+                a, ms = ask(args.ollama_url, model, st, args.timeout, mode)
                 res.append((c, a, ms))
-                rows.append(dict(model=model, input=kind, request_id=c['id'], label=c['label'], choice=a['choice'],
+                rows.append(dict(model=model, questions=mode, input=kind, request_id=c['id'], label=c['label'], choice=a['choice'],
                                  p_label=round(a['probabilities'][c['label']], 3),
                                  p_boundary=round(a['probabilities']['BOUNDARY_CONCERN'], 3),
                                  p_normal=round(a['probabilities']['NORMAL'], 3), top=round(a['probabilities'][a['choice']], 3),
@@ -126,7 +135,7 @@ def main():
             neg = [a['probabilities']['BOUNDARY_CONCERN'] for c, a, _ in res if c['label'] == 'NORMAL']
             lat = statistics.median(ms for *_, ms in res)
             b, n = hit('BOUNDARY_CONCERN'), hit('NORMAL')
-            print(f"{model:18s} {kind:9s} {acc:6.0%} {sum(b):3d}/{len(b):<4d} {sum(n):4d}/{len(n):<4d} {p_label:8.2f} "
+            print(f"{model:18s} {mode:7s} {kind:9s} {acc:6.0%} {sum(b):3d}/{len(b):<4d} {sum(n):4d}/{len(n):<4d} {p_label:8.2f} "
                   f"{statistics.mean(pos) if pos else 0:12.2f} {statistics.mean(neg) if neg else 0:14.2f} {top:9.2f} "
                   f"{lat / 1000:7.2f}s {(size or 0) / 2**30:7.2f}GB", flush=True)
     if args.out:

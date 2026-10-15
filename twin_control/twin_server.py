@@ -268,6 +268,11 @@ class Guard:
 def build_engine(own, rest):
     sys.path.insert(0, str(ENGINE_DIR))
     import zoo_vision_jev_new as zj
+    # R9: AI 모델과 질문 문구는 ai_model.json에서 정한다. 실행 옵션 --jev-model이 있으면 그 값이 우선한다.
+    ai_cfg = twin_ai.load_ai_config()
+    twin_ai.patch_questions(zj, ai_cfg['questions'])
+    if ai_cfg['model'] and not any(a == '--jev-model' or a.startswith('--jev-model=') for a in rest):
+        rest = [*rest, '--jev-model', ai_cfg['model']]
     saved = sys.argv
     sys.argv = [saved[0], '--data-dir', str(own.data_dir), *rest]
     try:
@@ -292,7 +297,7 @@ def create_app(zj, engine, args, accounts):
     snapshot_root = (engine.db.root / 'snapshots').resolve()
     live_ai = bool(args.jev and args.provider == 'ollama')
     ai_args = types.SimpleNamespace(
-        provider='ollama', jev_model=args.jev_model if args.provider == 'ollama' else 'tev1:0.8b',
+        provider='ollama', jev_model=args.jev_model if args.provider == 'ollama' else (twin_ai.load_ai_config()['model'] or 'tev1:0.8b'),
         ollama_url=args.ollama_url, jev_timeout=BATCH_TIMEOUT, score=False)
     job = dict(running=False, day='', total=0, done=0, errors=0, last_error='', finished_at='')
     job_lock = threading.Lock()

@@ -292,3 +292,51 @@ def make_worker(zj):
                     self.late += status == 'stale'
 
     return TwinJevWorker
+
+
+# ---------- R9: 질문 문구 보정 (엔진 파일은 고치지 않고 덧씌운다) ----------
+
+QUESTION_MODES = ('engine', 'fixed', 'guided')
+GEOMETRY_GUIDE = (' Use evidence.geometry when present. A foot only slightly outside the ROI '
+                  '(foot_outside_distance_ratio below about 0.03) seen briefly (violation_observed_span_sec near 0, '
+                  'few outside samples) right after the subject was inside is typical of occlusion or box jitter and '
+                  'does not by itself support BOUNDARY_CONCERN. A foot clearly outside the ROI (ratio above about 0.08) '
+                  'for about one second or more supports BOUNDARY_CONCERN.')
+
+
+def questions_for(zj, mode='guided', with_score=False):
+    """engine: 엔진 원래 질문 / fixed: 두 번째 질문 문구에 잘못 붙은 웹 주소를 뺀 것 /
+    guided: fixed + 위치 단서(geometry)를 읽는 기준 문장."""
+    q = zj.ORIGINAL_QUESTIONS(with_score) if hasattr(zj, 'ORIGINAL_QUESTIONS') else zj.questions(with_score)
+    if mode == 'engine':
+        return q
+    review = q['needs_immediate_review']
+    review['instructions'] = review['instructions'].replace('vhttp://127.0.0.1:7863/erify', 'verify')
+    if mode == 'guided':
+        q['situation']['instructions'] += GEOMETRY_GUIDE
+    return q
+
+
+def patch_questions(zj, mode):
+    """서버가 보내는 질문을 바꾼다. call_jev와 요청 기록이 zj.questions를 부르므로 그 이름을 바꿔 끼운다."""
+    if not hasattr(zj, 'ORIGINAL_QUESTIONS'):
+        zj.ORIGINAL_QUESTIONS = zj.questions
+    if mode == 'engine':
+        zj.questions = zj.ORIGINAL_QUESTIONS
+        return
+    zj.questions = lambda with_score=False: questions_for(zj, mode, with_score)
+    zj.QUESTION_VERSION = '1.0-' + mode
+
+
+
+def load_ai_config():
+    """ai_model.json (R9 I4). 파일이 없거나 잘못되면 엔진 기본값(tev1:0.8b, 엔진 질문)을 쓴다."""
+    from pathlib import Path
+    path = Path(__file__).resolve().parent / 'ai_model.json'
+    try:
+        cfg = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return dict(model=None, questions='engine')
+    mode = cfg.get('questions') if cfg.get('questions') in QUESTION_MODES else 'engine'
+    model = cfg.get('model') if isinstance(cfg.get('model'), str) and cfg.get('model').strip() else None
+    return dict(model=model, questions=mode)

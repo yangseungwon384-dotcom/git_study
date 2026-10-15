@@ -573,6 +573,11 @@ def make_analyzer(zj):
             """R8 I3: 엔진의 사건 요약에 위치·크기·지속 시간을 덧붙인다. 판정에는 쓰지 않고 AI 입력에만 들어간다."""
             state = super().build_state(cid, d, s, cfg, observed_at, video_sec, person_present, stamp)
             try:
+                # R9: 엔진은 이 칸에 그 대상의 모든 관측 수(구역 안 포함, 최대 64)를 넣는다. 이름대로 실제 위반 관측 수로 바로잡고,
+                # 원래 값은 track_samples로 남긴다. 4B 모델이 '위반 47회'로 읽고 오탐을 이탈로 확신한 원인이었다.
+                ev = state['evidence']
+                ev['track_samples'] = ev.get('recent_violation_samples')
+                ev['recent_violation_samples'] = sum(1 for x in s['watch'].samples if x[2] == 'risk') if s.get('watch') else 0
                 state['evidence']['geometry'] = geometry_evidence(self, cid, d, s, cfg, stamp)
             except Exception as exc:   # 덧붙이기에 실패해도 원래 요약은 그대로 보낸다
                 print('[ai-geometry]', type(exc).__name__, exc)
