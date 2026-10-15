@@ -13,6 +13,8 @@
 묶기는 이름만 바꾼다. 줄무늬 옷이나 다른 동물을 호랑이와 구별해 주지는 못한다.
 """
 from copy import deepcopy
+import json
+from dataclasses import replace
 import statistics
 import time
 import types
@@ -28,6 +30,10 @@ STATIC_PASS = 0.65     # 정지 물체 자리라도 이 신뢰도 이상인 박�
 ANCHOR_WINDOW = 60.0   # 자리마다 최근 이 시간의 관측만 본다
 ANCHOR_FORGET = 30.0   # 이 시간 동안 안 보인 자리는 잊는다
 ALIAS_BASE = 1000      # 엔진에 알려 줄 가짜 클래스 번호의 시작
+# 이탈 확정 (R1, 2026-10-15): 안전 쪽에 있던 동물이 밖으로 나간 것으로 보여도, 밖에서 연속으로 이만큼
+# 관측돼야 알림을 연다. 엔진 기본 규칙은 밖으로 나간 첫 관측(초당 약 3장 중 한 장)에서 바로 알림을 열었다.
+EXIT_SAMPLES = 3
+EXIT_SEC = 0.6
 
 # species: 엔진과 사건 기록에 남는 이름.  label: 화면에 쓰는 이름.
 # classes: 그 종으로 묶을 YOLO 클래스.  proxy: 묶은 클래스가 실제 종명이 아니다.
@@ -35,7 +41,7 @@ ALIAS_BASE = 1000      # 엔진에 알려 줄 가짜 클래스 번호의 시작
 CAMERAS = (
     dict(cam_id='ZOO_CAM_ELEPHANT_01', code='CAMERA 01', title='코끼리 방사장', desc='대형 동물 경계 · 이동 감시',
          file='elephant_cctv.mp4', species='elephant', label='코끼리', classes=('elephant',),
-         min_conf=0.45, proxy=False, static_filter=True),
+         min_conf=0.45, proxy=False, static_filter=True, exit_samples=EXIT_SAMPLES, exit_sec=EXIT_SEC, boundary_norm=None),
     dict(cam_id='ZOO_CAM_GIRAFFE_01', code='CAMERA 02', title='기린 관람 구역', desc='관람객 안전선 · 구역 감시',
          file='giraffe_cctv.mp4', species='giraffe', label='기린', classes=('giraffe',),
          min_conf=0.25, proxy=False, static_filter=False),
@@ -51,6 +57,58 @@ CAMERAS = (
 BY_ID = {cam['cam_id']: cam for cam in CAMERAS}
 LABELS = dict({cam['species']: cam['label'] for cam in CAMERAS}, person='사람')
 ZONE_KO = {'SAFE': '안전', 'DANGER': '위험', 'BOUNDARY': '경계'}
+
+
+def camera_gate(cam_id, name, gate):
+    """카메라별 경계 완충 폭. 사람에게는 쓰지 않는다. 값이 없으면 엔진 기본값 그대로."""
+    cam = BY_ID.get(cam_id)
+    if not cam or name == PERSON or cam.get('boundary_norm') is None:
+        return gate
+    return replace(gate, boundary_norm=cam['boundary_norm'])
+
+
+_WATCH = {}
+
+
+def object_watch_class():
+    """엔진의 ObjectWatch에 이탈 확정 조건을 더한 것. 엔진 모듈 경로가 잡힌 뒤에 만든다."""
+    if 'cls' in _WATCH:
+        return _WATCH['cls']
+    from dashboard_policy import ObjectWatch
+
+    class TwinObjectWatch(ObjectWatch):
+        """엔진은 안전 쪽에서 확인된 동물이 밖에서 한 번 관측되면 바로 알림을 연다 ('transition').
+        카메라에 exit_samples가 있으면, 밖(위험 쪽, 확정 신뢰도 이상) 관측이 끊김 없이 그만큼,
+        exit_sec 이상 이어진 뒤에만 연다. 경계 띠 관측이나 안전 관측이 끼면 처음부터 다시 센다."""
+        camera = None      # 분석 스레드가 판정 직전에 적는다
+
+        def update(self, mono, frame_key, confidence, relation, gate, person_inside, name):
+            result = super().update(mono, frame_key, confidence, relation, gate, person_inside, name)
+            cam = BY_ID.get(TwinObjectWatch.camera) or {}
+            need = cam.get('exit_samples')
+            if result['action'] == 'none' and self.last_clear == 'safe':
+                self.held_transition = False
+            if not need or name == PERSON:
+                return result
+            if result['action'] == 'open':
+                streak = []
+                for t, conf, side in reversed(self.samples):
+                    if side != 'risk' or conf < gate.confirm_min:
+                        break
+                    streak.append(t)
+                if len(streak) < need or (streak[0] - streak[-1]) < cam.get('exit_sec', 0):
+                    # 아직 짧다: 연 알림을 거둬들이고, 나중에 열 때 원래 종류를 쓰도록 기억한다
+                    self.event_open = False
+                    if result['kind'] == 'transition':
+                        self.held_transition = True
+                    return dict(result, action='hold_exit', kind=None)
+                if getattr(self, 'held_transition', False):
+                    self.held_transition = False
+                    return dict(result, kind='transition')
+            return result
+
+    _WATCH['cls'] = TwinObjectWatch
+    return TwinObjectWatch
 
 
 def label_of(name):
@@ -255,6 +313,47 @@ def make_analyzer(zj):
     """엔진의 LinkedAnalyzer에서 모델과 화면 그리기만 바꾼 분석기."""
 
     class TwinAnalyzer(zj.LinkedAnalyzer):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            # 엔진의 observe()는 판정할 때마다 dashboard_policy에서 ObjectWatch를 가져온다.
+            # 이탈 확정 조건을 더한 클래스로 바꿔 끼운다 (이 프로세스 안에서만).
+            import dashboard_policy
+            dashboard_policy.ObjectWatch = object_watch_class()
+            self.exit_log = self.db.root / 'exit_diagnostics.jsonl'
+
+        def gate_for(self, cid, name):
+            return camera_gate(cid, name, super().gate_for(cid, name))
+
+        def observe(self, cid, detections, frame, stamp, observed_at, video_sec, cfg, frame_key=None):
+            object_watch_class().camera = cid
+            r = self.runtime[cid]
+            before = {tid: s.get('event') for tid, s in r['tracks'].items()}
+            super().observe(cid, detections, frame, stamp, observed_at, video_sec, cfg, frame_key)
+            for d in detections:
+                s = r['tracks'].get(d['track_id'])
+                if s and s.get('event') and s['event'] != before.get(d['track_id']):
+                    self.log_exit(cid, d, s, frame, stamp, video_sec, cfg)
+
+        def log_exit(self, cid, d, s, frame, stamp, video_sec, cfg):
+            """사건이 열린 순간의 근거를 한 줄씩 남긴다 (R1 개선안 I1). 실패해도 분석은 계속한다."""
+            try:
+                import cv2
+                h, w = frame.shape[:2]
+                poly = self.pixel_polygon(cfg, w, h)
+                fx, fy = d['anchor'][0] * (w - 1), d['anchor'][1] * (h - 1)
+                gate = self.gate_for(cid, d['name'])
+                row = dict(at=zj.now().isoformat(timespec='seconds'), event=s['event'], camera=cid, track=d['track_id'],
+                           object=d['name'], confidence=round(d['confidence'], 3), relation=d.get('relation'),
+                           video_sec=round(video_sec, 2), bbox=d['bbox'], foot=[round(fx), round(fy)],
+                           distance_px=round(float(cv2.pointPolygonTest(poly, (float(fx), float(fy)), True)), 1) if poly is not None else None,
+                           margin_px=round(gate.boundary_norm * min(w, h), 1),
+                           recent=[dict(sec=round(t - stamp, 2), conf=round(c, 2), side=side)
+                                   for t, c, side in s['watch'].samples[-6:]])
+                with open(self.exit_log, 'a', encoding='utf-8') as handle:
+                    handle.write(json.dumps(row, ensure_ascii=False) + chr(10))
+            except Exception as exc:
+                print('[exit-log]', type(exc).__name__, exc)
+
         def detector(self):
             if self.model is None:
                 from ultralytics import YOLO
