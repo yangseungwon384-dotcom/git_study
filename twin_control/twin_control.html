@@ -75,6 +75,7 @@ body.em .grid{grid-template-columns:260px minmax(0,1fr) 350px}
 .card.intrude{border-color:var(--warn);background:var(--warn-bg)}
 .card .intr{grid-column:1/-1;display:flex;align-items:center;gap:5px;color:var(--warn);font-size:12px;font-weight:600}
 .card .intr svg{flex:none}
+.card .simb{grid-column:1/-1;justify-self:start;color:#b9a4ff;font-size:12px;border:1px dashed #8f7ae0;border-radius:4px;padding:0 6px}
 .card .nm{font-weight:600}
 .card .sub{color:var(--muted);font-size:12px}
 .card .r{text-align:right;font-size:12px}
@@ -559,7 +560,7 @@ function init(){
     teams:[],
     events:[], journal:[], radio:[], evSeq:0,
     ch:[{id:'CH-1',n:'보안 관제팀',st:'on'},{id:'CH-2',n:'맹수사 사육팀',st:'idle'},{id:'CH-3',n:'의료 / 구호팀',st:'off'}],
-    em:null, scn:null, autoQ:[], hillIntrude:false, doorsClosed:false, viewT:null, step:'대기 중. 시나리오를 시작하세요.'
+    em:null, scn:null, autoQ:[], simIntrude:null, doorsClosed:false, viewT:null, step:'대기 중. 시나리오를 시작하세요.'
   };
   S.animals.forEach(a => a.pos = {x:a.home.x, y:a.home.y});
   addEvent({t:S.t-1605,level:1,title:'CAM-04 연결 신호 지연',desc:'통신 네트워크 자동 복구 시도 중',cam:'CAM-04',zone:'hill',status:'ack',owner:'시스템',evd:['카메라 상태 점검']},true);
@@ -669,6 +670,7 @@ function renderAnimals(){
       '<span class="r '+(loc?(a.phase==='captured'?'s-ok':'s-crit'):'s-dim')+'">'+(loc?(loc.startsWith('영상')?loc:'위치: '+loc):'방사장 내')+'</span>'+
       (v?'<span class="sub num" data-vt="'+a.id+'"></span><span class="r sub num" data-vh="'+a.id+'"></span>'
         :'<span class="sub" style="grid-column:1/-1">생체 센서 없음 · 행동 지표로 관찰</span>')+
+      (simOf(a)?'<span class="simb">'+esc(simOf(a))+'</span>':'')+
       (pi?'<span class="intr"><svg width="13" height="13" viewBox="-7 -7 14 14" aria-hidden="true"><circle cy="-3" r="2.6" fill="currentColor"/><path d="M-5,6 q5,-9 10,0 Z" fill="currentColor"/></svg>'+
         '▲ 사람 침입 관측 · '+esc(pi.cam)+' · '+pi.n+'건'+(pi.since?' ('+esc(pi.since)+'부터)':'')+'</span>':'')+
       '</button>';
@@ -786,7 +788,7 @@ function renderMap2d(){
     hz.setAttribute('stroke', L.heat&&g[1]!=='ok' ? (g[1]==='crit'?MAPC.crit:MAPC.warn) : 'none');
     hz.setAttribute('stroke-dasharray', '6 4');
     p.setAttribute('stroke-width', r.zone===z.id?3.5:1.5);
-    p.style.stroke = r.zone===z.id ? '#ffffff' : (z.id==='hill'&&S.hillIntrude ? MAPC.warn : '');
+    p.style.stroke = r.zone===z.id ? '#ffffff' : (S.simIntrude===z.id ? MAPC.warn : '');
     $('#zt-'+z.id).textContent = L.heat ? '관람객 약 '+Math.round(S.zones[z.id])+'명 · '+g[0] : '';
   });
   $('#mZones').style.display = L.terrain?'':'none'; $('#mRoads').style.display = L.terrain?'':'none';
@@ -1075,7 +1077,7 @@ function detections(cid){
   if(cid==='CAM-07') return [{l:'호랑이',c:.96,x:50+w*4,y:48,w:26,h:16,k:'a'},{l:'곰',c:.91,x:104,y:46,w:20,h:18,k:'a'}];
   if(cid==='CAM-03') return [{l:'사람',c:.9,x:30+w*5,y:52,w:8,h:20,k:'p'},{l:'사람',c:.87,x:70-w*4,y:50,w:8,h:22,k:'p'},{l:'사람',c:.92,x:112+w*3,y:54,w:8,h:19,k:'p'}];
   if(cid==='CAM-12') return [{l:'사람',c:.89,x:44+w*3,y:54,w:8,h:20,k:'p'},{l:'사람',c:.85,x:96,y:52,w:8,h:21,k:'p'}];
-  return [{l:'사람',c:.9,x:40+w*4,y:52,w:8,h:20,k:'p'},{l:'사람',c:.93,x:S.hillIntrude?126:92,y:50,w:8,h:22,k:S.hillIntrude?'warn':'p'}];
+  return [{l:'사람',c:.9,x:40+w*4,y:52,w:8,h:20,k:'p'},{l:'사람',c:.93,x:S.simIntrude==='hill'?126:92,y:50,w:8,h:22,k:S.simIntrude==='hill'?'warn':'p'}];
 }
 let VIEW = 'dash';
 const CV = {layout:'grid', cam:null, edit:null};
@@ -1413,8 +1415,8 @@ function evAction(kind,id){
   const e=allEvents().find(x=>x.id===id); if(!e) return;
   if(e.live) return liveAction(kind,e);
   if(kind==='ack'){ e.status='ack'; e.owner=e.zone==='hill'?'보안 2조':'관제요원'; log(e.title+' 확인, 담당 '+e.owner); }
-  if(kind==='close'){ e.status='closed'; if(e.zone==='hill') S.hillIntrude=false; log(e.title+' 종료'); }
-  if(kind==='false'){ e.status='false'; e.note='사유: 현장 확인 결과 이상 없음'; if(e.animal==='ele'){ A('ele').phase='normal'; } if(e.zone==='hill') S.hillIntrude=false; S.autoQ=[]; log(e.title+' 오탐 처리, 사유 기록'); S.step='오탐 처리로 종료. 사유는 재학습 데이터로 저장됩니다.'; }
+  if(kind==='close'){ e.status='closed'; if(e.sim==='hill') S.simIntrude=null; log(e.title+' 종료'); }
+  if(kind==='false'){ e.status='false'; e.note='사유: 현장 확인 결과 이상 없음'; if(e.animal==='ele'){ A('ele').phase='normal'; } if(e.sim==='hill') S.simIntrude=null; S.autoQ=[]; log(e.title+' 오탐 처리, 사유 기록'); S.step='오탐 처리로 종료. 사유는 재학습 데이터로 저장됩니다.'; }
   if(kind==='real'){ confirmReal(e); }
   renderAll();
 }
@@ -1506,6 +1508,17 @@ function showReport(){
 
 /* ---------- scenario player ---------- */
 function auto(delay,fn){ S.autoQ.push({at:S.t+delay,fn}); }
+/* R12: 시나리오-카메라 매핑. 서버의 scenario_map.json을 시작할 때 읽고, 못 읽으면 같은 값을 쓴다. */
+let SIMMAP = {hill:{camera:'CAM-05',animal:'panda',zone:'farm',place:'레서판다 방사장 펜스',title:'관람객 제한 구역 울타리 접근'},
+              cam:{camera:'CAM-07',animal:'tiger',zone:'safari',delay_sec:2.4,title:'연결 신호 지연'}};
+if(location.protocol==='http:'||location.protocol==='https:')
+  fetch('/api/scenario-map',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(m=>{ if(m&&m.hill&&m.cam) SIMMAP={hill:Object.assign({},SIMMAP.hill,m.hill),cam:Object.assign({},SIMMAP.cam,m.cam)}; }).catch(()=>{});
+/* 그 동물 카드에 걸린 진행 중 모의 사건 (점선 보라 배지). 실제 사건·판정과는 따로다. */
+function simOf(a){
+  const e=S.events.filter(x=>x.sim&&x.animal===a.id&&(x.status==='new'||x.status==='ack'));
+  if(!e.length) return null;
+  return e.map(x=>'◇ 모의: '+(x.sim==='cam'?x.cam+' 신호 지연 '+(SIMMAP.cam.delay_sec)+'초':x.title+' ('+x.cam+')')).join(' · ');
+}
 const SCN = {
   ele:[
     [2,()=>{ S.step='1/8 평상시. 코끼리 체온이 주의 범위입니다.'; select('animal','ele'); }],
@@ -1518,16 +1531,19 @@ const SCN = {
       S.step='4/8 서로 다른 근거 3건 일치, Level 3 사건 생성. 영상으로 확인하세요.';
       auto(6,()=>{ const e=S.events.find(x=>x.level===3&&x.status==='new'); if(e) evAction('real',e.id); }); }]
   ],
+  /* R12: 두 시나리오가 걸리는 카메라·동물·구역은 scenario_map.json(SIMMAP)에서 정한다. 모의 사건이라 sim 표시가 붙는다. */
   hill:[
-    [3,()=>{ S.hillIntrude=true; addEvent({level:2,title:'관람객 제한 구역 울타리 접근',desc:'바람의 언덕 2번 펜스 인근 무단 접근 감지',zone:'hill',cam:'CAM-04',evd:['CAM-04 사람 검출 0.93','가상 경계선 침범']});
-      S.step='1/3 관람객이 제한 구역 경계선을 넘었습니다 (Level 2).';
-      auto(6,()=>{ const e=S.events.find(x=>x.zone==='hill'&&x.status==='new'); if(e){ evAction('ack',e.id); radio('관제 → CH-1: 보안 2조, 바람의 언덕 2번 펜스 확인 바람'); S.step='2/3 확인 후 보안 2조에 배정.'; } });
-      auto(16,()=>{ const e=S.events.find(x=>x.zone==='hill'&&x.status==='ack'&&x.level===2); if(e){ evAction('close',e.id); radio('CH-1 보안 2조: 관람객 안내 완료'); S.step='3/3 현장 안내 완료, 종료.'; S.scn=null; } }); }]
+    [3,()=>{ const m=SIMMAP.hill; S.simIntrude=m.zone;
+      addEvent({level:2,title:m.title,desc:m.place+' 인근 무단 접근 감지 (모의)',zone:m.zone,cam:m.camera,animal:m.animal,sim:'hill',evd:[m.camera+' 사람 검출 0.93 (모의)','가상 경계선 침범 (모의)']});
+      S.step='1/3 관람객이 '+m.place+' 경계선을 넘었습니다 (Level 2, 모의 · '+m.camera+').';
+      auto(6,()=>{ const e=S.events.find(x=>x.sim==='hill'&&x.status==='new'); if(e){ evAction('ack',e.id); radio('관제 → CH-1: 보안 2조, '+m.place+' 확인 바람'); S.step='2/3 확인 후 보안 2조에 배정.'; } });
+      auto(16,()=>{ const e=S.events.find(x=>x.sim==='hill'&&x.status==='ack'); if(e){ evAction('close',e.id); radio('CH-1 보안 2조: 관람객 안내 완료'); S.step='3/3 현장 안내 완료, 종료.'; S.scn=null; } }); }]
   ],
   cam:[
-    [3,()=>{ S.camState['CAM-12']='delay'; addEvent({level:1,title:'CAM-12 연결 신호 지연',desc:'통신 네트워크 자동 복구 시도 중',zone:'kayak',cam:'CAM-12',status:'ack',owner:'시스템',evd:['프레임 지연 2.4초']});
-      S.step='1/2 CAM-12 신호 지연 (Level 1). 자동 복구를 시도합니다.'; }],
-    [18,()=>{ delete S.camState['CAM-12']; const e=S.events.find(x=>x.cam==='CAM-12'&&x.status==='ack'); if(e){ e.status='closed'; e.note='자동 복구'; } log('CAM-12 자동 복구'); S.step='2/2 자동 복구 완료, 종료.'; S.scn=null; }]
+    [3,()=>{ const m=SIMMAP.cam; S.camState[m.camera]='delay';
+      addEvent({level:1,title:m.camera+' '+m.title,desc:'통신 네트워크 자동 복구 시도 중 (모의)',zone:m.zone,cam:m.camera,animal:m.animal,sim:'cam',status:'ack',owner:'시스템',evd:['프레임 지연 '+m.delay_sec+'초 (모의)']});
+      S.step='1/2 '+m.camera+' 신호 지연 (Level 1, 모의). 자동 복구를 시도합니다.'; }],
+    [18,()=>{ const m=SIMMAP.cam; delete S.camState[m.camera]; const e=S.events.find(x=>x.sim==='cam'&&x.status==='ack'); if(e){ e.status='closed'; e.note='자동 복구'; } log(m.camera+' 자동 복구'); S.step='2/2 자동 복구 완료, 종료.'; S.scn=null; }]
   ]
 };
 function startScenario(){

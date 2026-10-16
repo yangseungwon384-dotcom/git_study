@@ -72,6 +72,8 @@ PAGE = HERE / 'twin_control.html'
 MAP_FILE = HERE / 'map' / 'naturepark.json'
 # R11: 카메라가 맡은 동물. 사람 침입 사건도 그 동물 카드에 표시한다.
 CAMERA_ANIMAL_FILE = HERE / 'camera_animal.json'
+# R12: 모의 재생기 시나리오가 걸리는 카메라·동물. 화면이 시작할 때 읽는다.
+SCENARIO_MAP_FILE = HERE / 'scenario_map.json'
 
 
 def load_camera_animals():
@@ -600,6 +602,13 @@ def create_app(zj, engine, args, accounts):
     @app.get('/api/state')
     def api_state():
         return state()
+
+    @app.get('/api/scenario-map')
+    def api_scenario_map():
+        try:
+            return json.loads(SCENARIO_MAP_FILE.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            return {}
 
     @app.get('/api/map')
     def api_map():
