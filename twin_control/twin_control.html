@@ -72,6 +72,9 @@ body.em .grid{grid-template-columns:260px minmax(0,1fr) 350px}
 .card:hover{border-color:var(--line-2)}
 .card.sel{border-color:var(--accent);background:var(--accent-bg)}
 .card.alarm{border-color:var(--crit)}
+.card.intrude{border-color:var(--warn);background:var(--warn-bg)}
+.card .intr{grid-column:1/-1;display:flex;align-items:center;gap:5px;color:var(--warn);font-size:12px;font-weight:600}
+.card .intr svg{flex:none}
 .card .nm{font-weight:600}
 .card .sub{color:var(--muted);font-size:12px}
 .card .r{text-align:right;font-size:12px}
@@ -488,7 +491,7 @@ function connect(){
   let ws; try{ ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws'); }catch(err){ return; }
   ws.onmessage = m => {
     const d=JSON.parse(m.data), first=!LIVE.on;
-    LIVE.on=true; LIVE.cams=d.cameras; LIVE.boot=d.boot_error; LIVE.ai=d.ai||null; LIVE.me=d.me||null; renderAiHealth();
+    LIVE.on=true; LIVE.cams=d.cameras; LIVE.boot=d.boot_error; LIVE.ai=d.ai||null; LIVE.me=d.me||null; LIVE.animals=d.animals||{}; renderAiHealth();
     $('#meBox').hidden=!(LIVE.me&&LIVE.me.login); if(LIVE.me) $('#meName').textContent=LIVE.me.name+' ('+(LIVE.me.role==='admin'?'관리자':'관제요원')+')'; LIVE.events=d.events.map(liveToEvent);
     LIVE.alarm=new Set(LIVE.events.filter(e=>e.raw.active&&e.status!=='false'&&e.animal).map(e=>e.animal));
     const shift=d.now_sec-S.t;
@@ -602,6 +605,16 @@ function gateState(zone){
   if(open.length) return ['s-warn','◆ 개방 (작업 중)'];
   return ['s-ok','● 잠금 완료'];
 }
+/* R11: 그 동물 카메라에서 진행 중인 사람 침입 (서버가 계산: 진행 중, 미확인, 오탐 아님). 판정은 바꾸지 않는다. */
+const INTRUDE_HOLD_MS = 10000, intrudeSeen = {};
+function intrudeOf(a){
+  const st=LIVE.on&&LIVE.animals ? LIVE.animals[a.id] : null;
+  if(!st||!st.person) return null;
+  intrudeSeen[a.id]=Date.now();
+  const c=CAMS.find(x=>x.live===st.camera), tm=/(\d\d:\d\d:\d\d)/.exec(st.person_since||'');
+  return {n:st.person, cam:c?c.id:'', since:tm?tm[1]:''};
+}
+const intrudeOrder = a => !!intrudeOf(a) || (intrudeSeen[a.id] && Date.now()-intrudeSeen[a.id] < INTRUDE_HOLD_MS);
 function animalAlarm(a){ return (a.id==='ele' && (a.phase==='approach'||a.phase==='escaped')) || (LIVE.on && LIVE.alarm.has(a.id)); }
 function locText(a){
   if(LIVE.on && LIVE.alarm.has(a.id) && !(a.id==='ele'&&a.phase!=='normal')) return '영상에서 구역 밖 관측';
@@ -642,17 +655,22 @@ function renderTop(){
 function renderAnimals(){
   const q=$('#q').value.trim(), rf=$('#riskF').value, r=related();
   let list=S.animals.filter(a=>(!rf||a.risk===rf)&&(!q||(a.sp+a.nm+Z(a.zone).name).includes(q)));
-  list=list.slice().sort((a,b)=>(animalAlarm(b)?1:0)-(animalAlarm(a)?1:0));
+  /* R11: 이탈 경보 → 사람 침입 → 일반 순. 사람 침입이 꺼져도 10초 동안은 순서를 유지해 카드가 요동치지 않게 한다. */
+  const rank=a=>animalAlarm(a)?2:intrudeOrder(a)?1:0;
+  list=list.slice().sort((a,b)=>rank(b)-rank(a));
   $('#animalCount').textContent='총 142개체 중 '+list.length+'개체 표시';
   setHTML($('#animals'), list.map(a=>{
     const g=gateState(a.zone), loc=locText(a), v=vit(a);
-    return '<button class="card'+(r.animal===a.id?' sel':'')+(animalAlarm(a)?' alarm':'')+'" data-animal="'+a.id+'">'+
+    const pi=intrudeOf(a), al=animalAlarm(a);
+    return '<button class="card'+(r.animal===a.id?' sel':'')+(al?' alarm':pi?' intrude':'')+'" data-animal="'+a.id+'">'+
       '<span class="nm">'+a.sp+' <span class="tag '+(a.risk==='위험'?'d':a.risk==='주의'?'c':'')+'">'+a.risk+'</span></span>'+
       '<span class="r '+g[0]+'">'+g[1]+'</span>'+
       '<span class="sub">'+a.nm+' · '+Z(a.zone).name+'</span>'+
       '<span class="r '+(loc?(a.phase==='captured'?'s-ok':'s-crit'):'s-dim')+'">'+(loc?(loc.startsWith('영상')?loc:'위치: '+loc):'방사장 내')+'</span>'+
       (v?'<span class="sub num" data-vt="'+a.id+'"></span><span class="r sub num" data-vh="'+a.id+'"></span>'
         :'<span class="sub" style="grid-column:1/-1">생체 센서 없음 · 행동 지표로 관찰</span>')+
+      (pi?'<span class="intr"><svg width="13" height="13" viewBox="-7 -7 14 14" aria-hidden="true"><circle cy="-3" r="2.6" fill="currentColor"/><path d="M-5,6 q5,-9 10,0 Z" fill="currentColor"/></svg>'+
+        '▲ 사람 침입 관측 · '+esc(pi.cam)+' · '+pi.n+'건'+(pi.since?' ('+esc(pi.since)+'부터)':'')+'</span>':'')+
       '</button>';
   }).join('')||'<span class="sub" style="color:var(--muted)">조건에 맞는 개체가 없습니다. 검색어나 등급 필터를 바꿔 보세요.</span>');
   renderDetail(r);

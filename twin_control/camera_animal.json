@@ -1,0 +1,9 @@
+{
+  "note": "카메라가 맡은 동물 (R11). 화면의 동물 카드 ID와 같다. 사람 침입 사건도 이 동물 카드에 표시된다. 바꾸면 서버를 다시 켜야 적용된다.",
+  "cameras": {
+    "ZOO_CAM_ELEPHANT_01": "ele",
+    "ZOO_CAM_GIRAFFE_01": "giraffe",
+    "ZOO_CAM_TIGER_01": "tiger",
+    "ZOO_CAM_REDPANDA_01": "panda"
+  }
+}

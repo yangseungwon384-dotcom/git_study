@@ -70,6 +70,38 @@ ENGINE_DIR = HERE.parent / 'zoo_safe'
 PAGE = HERE / 'twin_control.html'
 # 3D 지도 설정 (R4). 구역·건물·카메라 좌표와 바닥 이미지 이름. 고치고 새로고침하면 바로 반영된다.
 MAP_FILE = HERE / 'map' / 'naturepark.json'
+# R11: 카메라가 맡은 동물. 사람 침입 사건도 그 동물 카드에 표시한다.
+CAMERA_ANIMAL_FILE = HERE / 'camera_animal.json'
+
+
+def load_camera_animals():
+    try:
+        cams = json.loads(CAMERA_ANIMAL_FILE.read_text(encoding='utf-8')).get('cameras') or {}
+        return {str(k): str(v) for k, v in cams.items()}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
+def animal_states(rows, camera_animal):
+    """동물 카드용 진행 중 상태 (R11, 판정은 읽기만 한다).
+    사람 침입: 진행 중이고, 아직 확인하지 않았고, 오탐으로 판정하지 않은 사람 사건이 있으면 켠다.
+    동물 이탈: 진행 중이고 오탐이 아닌 동물 사건 (화면의 기존 경보 기준과 같다)."""
+    out = {}
+    for row in rows:
+        animal = camera_animal.get(row.get('camera_id'))
+        if not animal or not row['active'] or row['review_label'] == '오탐':
+            continue
+        s = out.setdefault(animal, dict(camera=row.get('camera_id'), exit=0, person=0, person_since=None))
+        if row.get('object') == 'person':
+            if row['acknowledged_at']:
+                continue
+            s['person'] += 1
+            when = row.get('detected_at')
+            if when and (s['person_since'] is None or when < s['person_since']):
+                s['person_since'] = when
+        else:
+            s['exit'] += 1
+    return out
 PAGE_HEAD = ('<!doctype html><html lang="ko"><head><meta charset="utf-8">'
              '<meta name="viewport" content="width=device-width,initial-scale=1"></head><body>')
 FRAME_SEC = 0.1    # 화면용 영상 갱신 주기 (R5: 0.2 → 0.1. 영상은 최신 프레임, 박스는 마지막 분석 결과)
@@ -407,6 +439,8 @@ def create_app(zj, engine, args, accounts):
             del pump_ms[:-50]
             stop.wait(max(0.01, FRAME_SEC - spent))
 
+    camera_animal = load_camera_animals()
+
     def event_view(row, ai=None):
         path = row.get('snapshot_path')
         return dict(
@@ -419,6 +453,7 @@ def create_app(zj, engine, args, accounts):
             end_reason_ko=END_REASON_KO.get(row['end_reason'], row['end_reason']),
             acknowledged_at=row['acknowledged_at'], ack_name=row['ack_name'],
             review_label=row['review_label'], review_note=row['review_note'], zone=row.get('zone'),
+            animal=camera_animal.get(row.get('camera_id')),
             has_snapshot=bool(path and Path(path).is_file()), ai=ai)
 
     def state():
@@ -445,6 +480,7 @@ def create_app(zj, engine, args, accounts):
                     boot_error=engine.boot_error, cameras=cameras,
                     pump_ms=round(sorted(pump_ms)[len(pump_ms) // 2], 1) if pump_ms else None,
                     events=with_ai(rows[-EVENT_LIMIT:]),
+                    animals=animal_states(rows, camera_animal),
                     unacked=engine.db.unacked_count(),
                     ai=dict(live=live_ai, model=ai_args.jev_model, job=dict(job),
                             health=engine.worker.snapshot() if live_ai and hasattr(engine.worker, 'snapshot') else None))

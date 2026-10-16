@@ -19,7 +19,7 @@ HERE = Path(__file__).resolve().parent
 RELEASES = HERE / 'releases'
 STATE = RELEASES / 'state.json'
 # 이 도구(twin_release.py) 자체는 버전에 넣지 않는다. 되돌려도 도구는 최신 그대로 남는다.
-FILES = ('twin_server.py', 'twin_vision.py', 'twin_ai.py', 'twin_eval.py', 'twin_replay.py', 'twin_ai_compare.py', 'docs/giraffe_eval_set.csv', 'ai_model.json',
+FILES = ('twin_server.py', 'twin_vision.py', 'twin_ai.py', 'twin_eval.py', 'twin_replay.py', 'twin_ai_compare.py', 'docs/giraffe_eval_set.csv', 'ai_model.json', 'camera_animal.json', 'docs/intrusion_card_rule.md',
          'twin_control.html', 'docs/exit_alert_rule.md', 'docs/display_rule.md', 'docs/ai_rule.md', 'docs/map2d_rule.md', 'map/naturepark.json', 'map/naturepark_map.png',
          'run_twin_control.bat', 'run_twin_control_network.bat', 'run_twin_control_tunnel.bat', 'run_ai_eval.bat')
 
