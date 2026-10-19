@@ -141,7 +141,9 @@ EVENT_ID = re.compile(r'^[0-9a-f]{32}$')
 REVIEW_LABELS = ('실제 위험', '오탐', '판단 보류')
 # R2 (2026-10-15): 사람 진입 알림 문장에서 '(진입 확정 아님)'을 뺀다. 이미 저장된 사건도 보여 줄 때 뺀다.
 PERSON_ALERT_MSG = '안전구역 안에서 사람이 관측되었습니다. 담당자 확인이 필요합니다.'
-HIDDEN_PHRASE = ' (진입 확정 아님)'
+# R15 (2026-10-19): 동물 사건 문장의 '(탈출 확정 아님)'도 뺀다 (엔진의 기본 문장). 사건 DB의 원래 문장은 그대로 두고,
+# 화면과 CSV로 내보낼 때만 뺀다. 그래서 이미 저장된 사건에도 똑같이 적용된다. 띄어쓰기가 없는 변형도 함께 뺀다.
+HIDDEN_PHRASE = re.compile(r'\s*\((?:진입|탈출) ?확정 ?아님\)')
 DAY = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 DECISION_LIMIT = 300     # 판단 AI 탭에 한 번에 보내는 기록 수 (최근 것부터)
 USER_NAME = re.compile(r'^[A-Za-z0-9가-힣_.-]{2,32}$')
@@ -917,7 +919,7 @@ def create_app(zj, engine, args, accounts):
 
 
 def clean_message(text):
-    return text.replace(HIDDEN_PHRASE, '') if isinstance(text, str) else text
+    return HIDDEN_PHRASE.sub('', text).strip() if isinstance(text, str) else text
 
 
 def main():
