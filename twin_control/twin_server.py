@@ -84,6 +84,34 @@ def load_camera_animals():
         return {}
 
 
+# R13: 큰 화면 경보 대상. 동물 이탈은 이 카메라들만, 사람 침입은 모든 카메라.
+ALERT_EXIT_CAMERAS = ('ZOO_CAM_GIRAFFE_01',)
+
+
+def big_alerts(rows, camera_animal):
+    """큰 화면 경보 목록 (R13, 판정은 읽기만 한다). 진행 중이고, 아직 확인하지 않았고, 오탐이 아닌 실제 분석 사건만.
+    같은 카메라·같은 종류는 한 항목으로 묶는다. 순서: 동물 이탈 → 사람 침입, 같은 종류는 먼저 시작한 순."""
+    grouped = {}
+    for row in rows:
+        if not row['active'] or row['acknowledged_at'] or row['review_label'] == '오탐':
+            continue
+        cam = row.get('camera_id')
+        if row.get('object') == 'person':
+            kind = 'intrusion'
+        elif cam in ALERT_EXIT_CAMERAS:
+            kind = 'exit'
+        else:
+            continue
+        a = grouped.setdefault((cam, kind), dict(camera=cam, kind=kind, animal=camera_animal.get(cam),
+                                                  object_ko=twin_vision.label_of(row.get('object')),
+                                                  since=row.get('detected_at'), count=0, event_ids=[]))
+        a['count'] += 1
+        a['event_ids'].append(row['id'])
+        if row.get('detected_at') and (a['since'] is None or row['detected_at'] < a['since']):
+            a['since'] = row['detected_at']
+    return sorted(grouped.values(), key=lambda a: (a['kind'] != 'exit', a['since'] or ''))
+
+
 def animal_states(rows, camera_animal):
     """동물 카드용 진행 중 상태 (R11, 판정은 읽기만 한다).
     사람 침입: 진행 중이고, 아직 확인하지 않았고, 오탐으로 판정하지 않은 사람 사건이 있으면 켠다.
@@ -483,6 +511,7 @@ def create_app(zj, engine, args, accounts):
                     pump_ms=round(sorted(pump_ms)[len(pump_ms) // 2], 1) if pump_ms else None,
                     events=with_ai(rows[-EVENT_LIMIT:]),
                     animals=animal_states(rows, camera_animal),
+                    alerts=big_alerts(rows, camera_animal),
                     unacked=engine.db.unacked_count(),
                     ai=dict(live=live_ai, model=ai_args.jev_model, job=dict(job),
                             health=engine.worker.snapshot() if live_ai and hasattr(engine.worker, 'snapshot') else None))

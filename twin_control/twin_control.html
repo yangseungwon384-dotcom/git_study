@@ -75,6 +75,27 @@ body.em .grid{grid-template-columns:260px minmax(0,1fr) 350px}
 .card.intrude{border-color:var(--warn);background:var(--warn-bg)}
 .card .intr{grid-column:1/-1;display:flex;align-items:center;gap:5px;color:var(--warn);font-size:12px;font-weight:600}
 .card .intr svg{flex:none}
+/* R13: 경보 큰 화면 */
+#bigAlert{position:fixed;inset:0;z-index:60;background:rgba(5,9,16,.94);display:flex;flex-direction:column;padding:14px;gap:10px}
+#bigAlert[hidden]{display:none}
+.ba-head{display:flex;align-items:center;gap:12px;color:var(--fg);font-size:15px}
+.ba-head .sp{flex:1}
+.ba-grid{flex:1;display:grid;gap:10px;min-height:0}
+.ba-grid.n1{grid-template-columns:1fr}
+.ba-grid.n2{grid-template-columns:1fr 1fr}
+.ba-grid.n4{grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr}
+.ba-pane{display:flex;flex-direction:column;min-height:0;border:3px solid var(--crit);border-radius:10px;overflow:hidden;background:#000}
+.ba-pane.intrusion{border-color:var(--warn)}
+.ba-banner{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--crit);color:#fff;font-weight:800;font-size:clamp(16px,2.4vw,30px);line-height:1.2}
+.ba-pane.intrusion .ba-banner{background:var(--warn);color:#1a1205}
+.ba-banner .sub{font-size:clamp(12px,1.2vw,16px);font-weight:600;opacity:.9}
+.ba-banner .sp{flex:1}
+.ba-banner .btn{flex:none;white-space:nowrap;font-size:14px;padding:6px 14px;background:#fff;color:#111;border:0;font-weight:700}
+.ba-video{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;background:#000}
+.ba-video img{max-width:100%;max-height:100%;object-fit:contain}
+.ba-more{color:var(--muted);font-size:13px}
+#baOpen{border:1px solid var(--crit);color:var(--crit);background:var(--crit-bg)}
+.cam .rest{display:flex;align-items:center;justify-content:center;aspect-ratio:16/9;background:#070c16;color:var(--muted);font-size:12px}
 .card .simb{grid-column:1/-1;justify-self:start;color:#b9a4ff;font-size:12px;border:1px dashed #8f7ae0;border-radius:4px;padding:0 6px}
 .card .nm{font-weight:600}
 .card .sub{color:var(--muted);font-size:12px}
@@ -243,6 +264,7 @@ a.btn[aria-disabled="true"]{opacity:.45;pointer-events:none}
     <div class="brand">ZOO-GIS TWIN CONTROL <span class="chip">AI 통합 관제</span><span class="chip mock" id="modeChip">모의 데이터</span></div>
     <div class="stats" id="stats"></div>
     <div class="stat" id="meBox" hidden><b id="meName"></b> <button class="btn sm" id="logout">로그아웃</button></div>
+    <button class="btn sm" id="baOpen" hidden>경보 큰 화면</button>
     <div class="clock num" id="clock">--:--:--</div>
     <button class="cover" id="cover" title="2초간 길게 누르면 비상 모드 확인창이 열립니다"><i></i><span>COVER 비상 모드 (2초 누르기)</span></button>
   </header>
@@ -427,6 +449,11 @@ a.btn[aria-disabled="true"]{opacity:.45;pointer-events:none}
   </section>
 </div>
 
+<div id="bigAlert" hidden role="dialog" aria-modal="true" aria-labelledby="baTitle">
+  <div class="ba-head"><b id="baTitle">경보</b><span class="sp"></span><button class="btn" id="baClose">닫기 (경보는 계속 진행)</button></div>
+  <div class="ba-grid" id="baGrid"></div>
+  <div class="ba-more" id="baMore"></div>
+</div>
 <div class="ov" id="ov" hidden><div class="dlg" role="dialog" aria-modal="true" id="dlg"></div></div>
 
 <script>
@@ -478,6 +505,43 @@ function post(path, body){
   return fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})})
     .then(r=>{ if(r.status===401) toLogin(); if(!r.ok) throw new Error(r.status===403?'권한 없음':'HTTP '+r.status); return r.json(); });
 }
+/* R13: 경보 큰 화면. 서버의 alerts(진행 중·미확인·오탐 아닌 기린 이탈과 사람 침입, 카메라별로 묶음)를 크게 띄운다.
+   새 경보가 생기면 자동으로 열린다. 닫으면 그 경보는 60초 동안 다시 자동으로 열지 않는다(새 사건이 붙어도).
+   경보가 모두 확인·종료되면 저절로 닫힌다. 모의 재생기 사건은 띄우지 않는다. */
+const BIG = {open:false, shown:'', dismissed:{}, seen:new Set(), COOLDOWN_MS:60000, MAX:4};
+const bigKey = a => a.camera+'|'+a.kind;
+const KIND_KO = {exit:'구역 이탈 관측', intrusion:'사람 구역 침입'};
+function renderBig(){
+  const alerts=(LIVE.on&&LIVE.alerts)||[], now=Date.now();
+  let fresh=false;
+  alerts.forEach(a=>a.event_ids.forEach(id=>{ if(!BIG.seen.has(id)){ BIG.seen.add(id); const d=BIG.dismissed[bigKey(a)]; if(!d||now-d>BIG.COOLDOWN_MS) fresh=true; } }));
+  if(!alerts.length){ if(BIG.open) setBig(false); $('#baOpen').hidden=true; return; }
+  $('#baOpen').hidden=BIG.open; $('#baOpen').textContent='경보 큰 화면 ('+alerts.length+')';
+  if(fresh && !BIG.open) setBig(true);
+  if(!BIG.open) return;
+  const show=alerts.slice(0,BIG.MAX), rest=alerts.slice(BIG.MAX);
+  $('#baTitle').textContent='경보 '+alerts.length+'건 · 실제 영상 분석';
+  const key=show.map(bigKey).join(',');
+  if(BIG.shown!==key){   // 칸 구성이 바뀔 때만 다시 그린다 (영상 연결을 끊었다 잇지 않게)
+    BIG.shown=key; const g=$('#baGrid'); stopStreams(g);
+    g.className='ba-grid '+(show.length===1?'n1':show.length===2?'n2':'n4');
+    g.innerHTML=show.map(a=>{ const c=CAMS.find(x=>x.live===a.camera);
+      return '<section class="ba-pane '+a.kind+'" data-bk="'+esc(bigKey(a))+'"><div class="ba-banner"><span>▲ '+esc((c?c.name:a.camera))+' · '+KIND_KO[a.kind]+'</span>'+
+        '<span class="sub" data-bsub></span><span class="sp"></span>'+
+        '<button class="btn sm" data-back="'+esc(bigKey(a))+'">확인</button></div>'+
+        '<div class="ba-video"><img src="/stream/'+a.camera+'.mjpg" alt="'+esc(a.camera)+' 실영상"></div></section>'; }).join('');
+  }
+  show.forEach(a=>{ const el=document.querySelector('[data-bk="'+bigKey(a)+'"] [data-bsub]'), c=CAMS.find(x=>x.live===a.camera), tm=/(\d\d:\d\d:\d\d)/.exec(a.since||'');
+    if(el) el.textContent=(c?c.id:'')+' · '+(a.kind==='exit'?a.object_ko:'사람')+' '+a.count+'건'+(tm?' · '+tm[1]+'부터':''); });
+  setHTML($('#baMore'), rest.length ? '그 밖의 경보 '+rest.length+'건: '+rest.map(a=>{ const c=CAMS.find(x=>x.live===a.camera); return esc((c?c.id:a.camera)+' '+KIND_KO[a.kind]); }).join(', ') : '');
+}
+function setBig(open){
+  BIG.open=open; $('#bigAlert').hidden=!open;
+  if(!open){ stopStreams($('#baGrid')); $('#baGrid').innerHTML=''; BIG.shown=''; }
+  renderCams(); renderCamView();   // 작은 영상 칸의 스트림을 쉬게 하거나 다시 연다
+  if(open) renderBig(); else { const n=((LIVE.on&&LIVE.alerts)||[]).length; $('#baOpen').hidden=!n; }
+}
+function closeBig(){ const now=Date.now(); ((LIVE.on&&LIVE.alerts)||[]).forEach(a=>{ BIG.dismissed[bigKey(a)]=now; }); setBig(false); }
 function liveAction(kind, e){
   const base='/api/events/'+e.raw.id, who={name:'관제요원'};
   let job;
@@ -492,7 +556,7 @@ function connect(){
   let ws; try{ ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws'); }catch(err){ return; }
   ws.onmessage = m => {
     const d=JSON.parse(m.data), first=!LIVE.on;
-    LIVE.on=true; LIVE.cams=d.cameras; LIVE.boot=d.boot_error; LIVE.ai=d.ai||null; LIVE.me=d.me||null; LIVE.animals=d.animals||{}; renderAiHealth();
+    LIVE.on=true; LIVE.cams=d.cameras; LIVE.boot=d.boot_error; LIVE.ai=d.ai||null; LIVE.me=d.me||null; LIVE.animals=d.animals||{}; LIVE.alerts=d.alerts||[]; renderAiHealth(); renderBig();
     $('#meBox').hidden=!(LIVE.me&&LIVE.me.login); if(LIVE.me) $('#meName').textContent=LIVE.me.name+' ('+(LIVE.me.role==='admin'?'관리자':'관제요원')+')'; LIVE.events=d.events.map(liveToEvent);
     LIVE.alarm=new Set(LIVE.events.filter(e=>e.raw.active&&e.status!=='false'&&e.animal).map(e=>e.animal));
     const shift=d.now_sec-S.t;
@@ -1085,7 +1149,8 @@ const CV = {layout:'grid', cam:null, edit:null};
 function camTile(cid, selected, action){
   const c=CAMS.find(c=>c.id===cid), col={a:'#4c9dff',p:'#8d9ab4',crit:'#ff5f5f',warn:'#f2b33d',ok:'#3ecf8e'};
   if(c.live&&LIVE.on) return '<button class="cam'+(selected?' sel':'')+'" '+action+'="'+cid+'" aria-label="'+cid+' '+c.name+' 실영상">'+
-    '<img src="/stream/'+c.live+'.mjpg" alt="'+cid+' '+c.name+' 실영상"><span class="cap">'+cid+' '+c.name+'</span><span class="st" data-ls="'+c.live+'"></span></button>';
+    (BIG.open ? '<span class="rest">경보 큰 화면에서 보는 중</span>' : '<img src="/stream/'+c.live+'.mjpg" alt="'+cid+' '+c.name+' 실영상">')+
+    '<span class="cap">'+cid+' '+c.name+'</span><span class="st" data-ls="'+c.live+'"></span></button>';
   const d=detections(cid), st=S.camState[cid];
   const alarm=d.some(x=>x.k==='crit'||x.k==='warn');
   return '<button class="cam'+(selected?' sel':'')+(alarm?' alarm':'')+'" '+action+'="'+cid+'" aria-label="'+cid+' '+c.name+'">'+
@@ -1604,6 +1669,13 @@ document.addEventListener('keydown',ev=>{ if(ev.key==='Escape') closeDialog(); i
 $('#tl').addEventListener('click',ev=>{ const r=$('#tl').getBoundingClientRect(), x=(ev.clientX-r.left)/r.width*900; const t=T(9,0)+(x-44)/836*9*3600; S.viewT=Math.max(T(9,0),Math.min(S.t,t)); renderTimeline(); });
 $('#q').addEventListener('input',renderAnimals); $('#riskF').addEventListener('change',renderAnimals); $('#showDone').addEventListener('change',renderFeed);
 $('#scnPlay').addEventListener('click',startScenario);
+$('#baClose').addEventListener('click',closeBig);
+$('#baOpen').addEventListener('click',()=>setBig(true));
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&BIG.open) closeBig(); });
+$('#baGrid').addEventListener('click',e=>{ const b=e.target.closest('[data-back]'); if(!b) return;
+  const a=((LIVE.alerts)||[]).find(x=>bigKey(x)===b.dataset.back); if(!a) return;
+  b.disabled=true; b.textContent='확인 중';
+  Promise.all(a.event_ids.map(id=>post('/api/events/'+id+'/ack',{name:'관제요원'}))).catch(err=>{ b.disabled=false; b.textContent='확인 실패: '+err.message; }); });
 document.querySelectorAll('[data-mapview]').forEach(b=>b.addEventListener('click',()=>{ if(b.dataset.mapview==='3d') show3d(); else { m3Mode('2d'); m3Note(''); } }));
 setInterval(m3FpsSample, 1000);
 window.addEventListener('resize', ()=>{ if(M3.mode==='3d') m3Resize(); });
