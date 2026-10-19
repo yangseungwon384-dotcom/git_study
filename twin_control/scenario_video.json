@@ -1,0 +1,15 @@
+{
+  "note": "실영상 시나리오 (R16). 여기 적은 카메라는 평소에는 normal 영상을 반복 재생하고, 재생기에서 시나리오를 시작하면 scenario 영상을 한 번 재생한 뒤 평소 영상으로 돌아간다. 파일 이름은 영상 폴더(--source-dir, 저장소를 통째로 받았으면 저장소 폴더) 기준이다. normal 파일이 없으면 그 카메라는 이전처럼 scenario 영상만 반복한다. 적지 않은 카메라(코끼리·호랑이)는 바뀌지 않는다. 바꾸면 서버를 다시 시작해야 한다.",
+  "cameras": {
+    "ZOO_CAM_GIRAFFE_01": {
+      "normal": "giraffe_safe_cctv.mp4",
+      "scenario": "giraffe_cctv.mp4",
+      "title": "기린 이탈 (실영상)"
+    },
+    "ZOO_CAM_REDPANDA_01": {
+      "normal": "redpanda_safe_cctv.mp4",
+      "scenario": "redpanda_cctv.mp4",
+      "title": "레서판다 사람 침입 (실영상)"
+    }
+  }
+}

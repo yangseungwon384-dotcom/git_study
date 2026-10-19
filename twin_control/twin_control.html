@@ -162,6 +162,11 @@ body.em .grid{grid-template-columns:260px minmax(0,1fr) 350px}
 .snap{display:block;width:100%;height:auto;border-radius:6px}
 .cam .cap{position:absolute;left:6px;top:4px;font-size:11px;color:var(--fg);text-shadow:0 1px 2px #000}
 .cam .st{position:absolute;right:6px;top:4px;font-size:10.5px}
+/* R16: 영상 모드 배지. 평소 = 회색 테두리, 시나리오 = 주황 채움 + ▶ (모의 보라 점선과 구분) */
+.cam .vm{position:absolute;left:6px;bottom:5px;font-size:11px;font-weight:700;border-radius:4px;padding:0 6px;line-height:18px}
+.cam .vm[hidden]{display:none}
+.vm-n{background:rgba(10,17,30,.72);color:#c9d2e3;border:1px solid #6b778c}
+.vm-s{background:#f08a24;color:#1a1205;border:1px solid #f08a24}
 .toggle{display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:400;color:var(--muted)}
 
 /* events */
@@ -434,9 +439,12 @@ a.btn[aria-disabled="true"]{opacity:.45;pointer-events:none}
     <strong style="color:var(--fg)">모의 재생기</strong><span class="chip-mock">시연·교육용 · 실제 영상과 무관</span>
     <label for="scnSel">시나리오
       <select id="scnSel">
+        <optgroup label="모의 (이 브라우저 안에서만)">
         <option value="ele">코끼리 이탈 징후 (Level 3)</option>
         <option value="hill">관람객 제한 구역 접근 (Level 2)</option>
         <option value="cam">카메라 신호 지연 (Level 1)</option>
+        </optgroup>
+        <optgroup id="scnLive" label="실영상 (서버 영상 전환 · 모든 화면 · 사건 기록됨)" hidden></optgroup>
       </select>
     </label>
     <button class="primary" id="scnPlay">시나리오 시작</button>
@@ -550,7 +558,8 @@ function renderBig(){
         '<div class="ba-video"><img src="/stream/'+a.camera+'.mjpg" alt="'+esc(a.camera)+' 실영상"></div></section>'; }).join('');
   }
   show.forEach(a=>{ const el=document.querySelector('[data-bk="'+bigKey(a)+'"] [data-bsub]'), c=CAMS.find(x=>x.live===a.camera), tm=/(\d\d:\d\d:\d\d)/.exec(a.since||'');
-    if(el) el.textContent=(c?c.id:'')+' · '+(a.kind==='exit'?a.object_ko:'사람')+' '+a.count+'건'+(tm?' · '+tm[1]+'부터':''); });
+    const v=videoOf(a.camera);
+    if(el) el.textContent=(c?c.id:'')+' · '+(a.kind==='exit'?a.object_ko:'사람')+' '+a.count+'건'+(tm?' · '+tm[1]+'부터':'')+(v?(v.mode==='scenario'?' · ▶ 시나리오 영상':' · 평소 영상'):''); });
   setHTML($('#baMore'), rest.length ? '그 밖의 경보 '+rest.length+'건: '+rest.map(a=>{ const c=CAMS.find(x=>x.live===a.camera); return esc((c?c.id:a.camera)+' '+KIND_KO[a.kind]); }).join(', ') : '');
 }
 function setBig(open){
@@ -1168,7 +1177,7 @@ function camTile(cid, selected, action){
   const c=CAMS.find(c=>c.id===cid), col={a:'#4c9dff',p:'#8d9ab4',crit:'#ff5f5f',warn:'#f2b33d',ok:'#3ecf8e'};
   if(c.live&&LIVE.on) return '<button class="cam'+(selected?' sel':'')+'" '+action+'="'+cid+'" aria-label="'+cid+' '+c.name+' 실영상">'+
     (BIG.open ? '<span class="rest">경보 큰 화면에서 보는 중</span>' : '<img src="/stream/'+c.live+'.mjpg" alt="'+cid+' '+c.name+' 실영상">')+
-    '<span class="cap">'+cid+' '+c.name+'</span><span class="st" data-ls="'+c.live+'"></span></button>';
+    '<span class="cap">'+cid+' '+c.name+'</span><span class="st" data-ls="'+c.live+'"></span><span class="vm" data-vm="'+c.live+'" hidden></span></button>';
   const d=detections(cid), st=S.camState[cid];
   const alarm=d.some(x=>x.k==='crit'||x.k==='warn');
   return '<button class="cam'+(selected?' sel':'')+(alarm?' alarm':'')+'" '+action+'="'+cid+'" aria-label="'+cid+' '+c.name+'">'+
@@ -1455,7 +1464,40 @@ function setView(v){
   if(VIEW==='ai'){ $('#aiDay').value=AIV.day; loadAi(); }
 }
 
+/* R16: 실영상 시나리오. 서버가 카메라 영상을 평소 영상 ↔ 시나리오 영상으로 바꾼다 (모든 화면에 같이 보이고 사건이 기록된다). */
+const LSC = {cam:null, since:0, seen:false};
+const videoOf = live => { const c=LIVE.on&&LIVE.cams.find(x=>x.id===live); return c&&c.video; };
+function videoBadge(el, v){
+  el.hidden=!v; if(!v) return;
+  const scn=v.mode==='scenario';
+  el.className='vm '+(scn?'vm-s':'vm-n');
+  el.textContent=scn ? '▶ 시나리오 영상'+(v.duration?' '+Math.min(Math.round(v.sec),Math.round(v.duration))+'/'+Math.round(v.duration)+'초':'') : '평소 영상';
+}
+function liveScenarioStep(){
+  if(!LSC.cam) return;
+  const v=videoOf(LSC.cam), c=CAMS.find(x=>x.live===LSC.cam);
+  /* 서버 상태가 아직 바뀌기 전(시작 직후 몇 초)은 '끝남'으로 보지 않는다 */
+  if(v&&v.mode!=='scenario'&&!LSC.seen&&Date.now()-LSC.since<5000) return;
+  if(v&&v.mode==='scenario'){ LSC.seen=true; S.step='실영상: '+(c?c.id+' '+c.name:LSC.cam)+' 시나리오 영상 재생 중'+(v.duration?' ('+Math.round(v.sec)+'/'+Math.round(v.duration)+'초)':'')+'. 끝나면 평소 영상으로 돌아갑니다.'; }
+  else { S.step='실영상: '+(c?c.id+' '+c.name:LSC.cam)+' 시나리오가 끝나 평소 영상으로 돌아왔습니다.'; LSC.cam=null; }
+  $('#scnStep').textContent=S.step;
+}
+function startLiveScenario(live){
+  const c=CAMS.find(x=>x.live===live);
+  post('/api/scenario-video/'+live+'/start').then(r=>{
+    if(LSC.cam!==live) Object.assign(LSC, {cam:live, since:Date.now(), seen:false});
+    S.step='실영상: '+(c?c.id+' '+c.name:live)+(r.started?' 시나리오 영상으로 바꿨습니다.':' 이미 시나리오 영상이 재생 중입니다 (처음부터 다시 틀지 않음).');
+    $('#scnStep').textContent=S.step;
+  }).catch(err=>{ S.step='실영상 시나리오 시작 실패: '+err.message; $('#scnStep').textContent=S.step; });
+}
+function resetLiveScenario(){
+  if(!(LIVE.on&&LIVE.cams.some(c=>c.video&&c.video.mode==='scenario'))) return;
+  post('/api/scenario-video/reset').then(()=>{ S.step='초기화: 실영상 시나리오를 멈추고 평소 영상으로 돌렸습니다.'; LSC.cam=null; $('#scnStep').textContent=S.step; })
+    .catch(err=>{ S.step='실영상 초기화 실패: '+err.message; $('#scnStep').textContent=S.step; });
+}
 function liveCamStatus(){
+  document.querySelectorAll('[data-vm]').forEach(el=>videoBadge(el, videoOf(el.dataset.vm)));
+  liveScenarioStep();
   document.querySelectorAll('[data-ls]').forEach(el=>{
     const c=LIVE.cams.find(x=>x.id===el.dataset.ls); if(!c) return;
     const danger=c.detections.some(d=>d.danger);
@@ -1631,6 +1673,8 @@ const SCN = {
   ]
 };
 function startScenario(){
+  const v=$('#scnSel').value;
+  if(v.startsWith('live:')) return startLiveScenario(v.slice(5));
   init(); S.scn={id:$('#scnSel').value,start:S.t,cur:0}; S.speed=+$('#scnSpeed').value; S.step='시나리오 시작.'; renderAll();
 }
 
@@ -1702,7 +1746,7 @@ setInterval(m3FpsSample, 1000);
 window.addEventListener('resize', ()=>{ if(M3.mode==='3d') m3Resize(); });
 document.addEventListener('visibilitychange', ()=>{ if(!document.hidden&&M3.mode==='3d') m3Loop(); });
 $('#scnPause').addEventListener('click',()=>{ S.playing=!S.playing; $('#scnPause').textContent=S.playing?'일시정지':'계속'; });
-$('#scnReset').addEventListener('click',()=>{ init(); renderAll(); });
+$('#scnReset').addEventListener('click',()=>{ init(); renderAll(); resetLiveScenario(); });
 $('#scnSpeed').addEventListener('change',e=>{ S.speed=+e.target.value; });
 (function(){ const b=$('#cover'); let tm=null;
   const ask=()=>dialog('<h3>비상 모드를 발령할까요?</h3><div>대응조가 호출되고 대피로가 지도에 표시됩니다. 발령자와 시각이 기록됩니다.</div><div class="btns"><button class="btn" data-dlg="close">취소</button><button class="btn danger" data-dlg="cover">비상 모드 발령</button></div>');
@@ -1713,6 +1757,10 @@ $('#scnSpeed').addEventListener('change',e=>{ S.speed=+e.target.value; });
 })();
 
 init(); if(location.hash==='#cameras') VIEW='cam'; if(location.hash==='#csv') VIEW='csv'; if(location.hash==='#ai') VIEW='ai';
+fetch('/api/scenario-video').then(r=>r.ok?r.json():null).then(d=>{
+  if(!d||!d.cameras||!d.cameras.length) return;
+  const g=$('#scnLive'); g.innerHTML=d.cameras.map(x=>'<option value="live:'+esc(x.camera)+'">'+esc(x.title)+'</option>').join(''); g.hidden=false;
+}).catch(()=>{});
 $('#csvCam').insertAdjacentHTML('beforeend', CAMS.filter(c=>c.live).map(c=>'<option value="'+c.live+'">'+c.id+' '+c.name+'</option>').join(''));
 $('#csvDay').value=CSVV.day;
 $('#csvDay').addEventListener('change',e=>{ CSVV.day=e.target.value||today(); e.target.value=CSVV.day; CSVV.state='idle'; CSVV.rows=[]; renderCsv(); loadCsv(); });
