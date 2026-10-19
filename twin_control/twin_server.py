@@ -141,7 +141,9 @@ EVENT_ID = re.compile(r'^[0-9a-f]{32}$')
 REVIEW_LABELS = ('실제 위험', '오탐', '판단 보류')
 # R2 (2026-10-15): 사람 진입 알림 문장에서 '(진입 확정 아님)'을 뺀다. 이미 저장된 사건도 보여 줄 때 뺀다.
 PERSON_ALERT_MSG = '안전구역 안에서 사람이 관측되었습니다. 담당자 확인이 필요합니다.'
-HIDDEN_PHRASE = ' (진입 확정 아님)'
+# R15 (2026-10-19): 동물 사건 문장의 '(탈출 확정 아님)'도 뺀다 (엔진의 기본 문장). 사건 DB의 원래 문장은 그대로 두고,
+# 화면과 CSV로 내보낼 때만 뺀다. 그래서 이미 저장된 사건에도 똑같이 적용된다. 띄어쓰기가 없는 변형도 함께 뺀다.
+HIDDEN_PHRASE = re.compile(r'\s*\((?:진입|탈출) ?확정 ?아님\)')
 DAY = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 DECISION_LIMIT = 300     # 판단 AI 탭에 한 번에 보내는 기록 수 (최근 것부터)
 USER_NAME = re.compile(r'^[A-Za-z0-9가-힣_.-]{2,32}$')
@@ -327,9 +329,38 @@ class Guard:
         await self.app(scope, receive, send)
 
 
+ROI_SEED_FILE = HERE / 'roi_seed.json'
+
+
+def seed_roi(data_dir):
+    """사건 DB에 구역이 없는 카메라만 roi_seed.json 값으로 채운다 (새 PC에서 받아도 같은 구역). 있는 구역은 건드리지 않는다."""
+    try:
+        seed = json.loads(ROI_SEED_FILE.read_text(encoding='utf-8')).get('cameras') or {}
+    except (OSError, ValueError):
+        return []
+    data_dir.mkdir(parents=True, exist_ok=True)
+    added = []
+    with sqlite3.connect(data_dir / 'events.sqlite3') as db:
+        db.execute('CREATE TABLE IF NOT EXISTS roi(camera TEXT PRIMARY KEY, json TEXT)')
+        for camera, cfg in seed.items():
+            if db.execute('INSERT OR IGNORE INTO roi(camera, json) VALUES(?,?)',
+                          (camera, json.dumps(cfg, ensure_ascii=False))).rowcount:
+                added.append(camera)
+    return added
+
+
 def build_engine(own, rest):
     sys.path.insert(0, str(ENGINE_DIR))
     import zoo_vision_jev_new as zj
+    # 저장소를 통째로 받은 PC: 영상·zoo_vision.py·yolo26n.pt가 twin_control 바로 위 폴더에 있으면 그 폴더를 쓴다.
+    # 이 PC처럼 영상이 다른 곳(C:\code\code_test\zoo)에 있으면 엔진 기본값을 그대로 쓴다.
+    repo = HERE.parent
+    if not any(a == '--source-dir' or a.startswith('--source-dir=') for a in rest) \
+            and (repo / 'zoo_vision.py').is_file() and (repo / 'giraffe_cctv.mp4').is_file():
+        rest = [*rest, '--source-dir', str(repo)]
+    added = seed_roi(own.data_dir)
+    if added:
+        print('  기본 안전구역을 채웠습니다:', ', '.join(added))
     # R9: AI 모델과 질문 문구는 ai_model.json에서 정한다. 실행 옵션 --jev-model이 있으면 그 값이 우선한다.
     ai_cfg = twin_ai.load_ai_config()
     twin_ai.patch_questions(zj, ai_cfg['questions'])
@@ -917,7 +948,7 @@ def create_app(zj, engine, args, accounts):
 
 
 def clean_message(text):
-    return text.replace(HIDDEN_PHRASE, '') if isinstance(text, str) else text
+    return HIDDEN_PHRASE.sub('', text).strip() if isinstance(text, str) else text
 
 
 def main():

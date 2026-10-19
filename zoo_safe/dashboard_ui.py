@@ -532,6 +532,17 @@ def build_dashboard(original, engine):
         engine.focus_index = codes.index(code) if code in codes else 0
         return code
 
+    def camera_label(code):
+        cam = next((item for item in original.CAMERAS if item['code'] == code), original.CAMERAS[0])
+        return f"{cam['code']} · {cam['title']}"
+
+    def show_one(code):
+        """선택한 카메라만 크게 보여 준다. 4분할로 바꾸면 네 화면이 다시 나온다."""
+        set_focus(code)
+        hidden = tuple(gr.update(visible=False) for _ in original.CAMERAS)
+        shown = gr.update(visible=True, label=camera_label(code))
+        return ('1분할', *hidden, shown)
+
     def show_roi(value):
         with engine.lock:
             for runtime in engine.runtime.values():
@@ -889,9 +900,15 @@ def build_dashboard(original, engine):
         shot_restore.click(lambda event_id: run_restore(event_id, 'snapshot'), selected, shot_msg)
         prev_btn.click(lambda *args: move_shot(*args, -1), [shot_from, shot_to, shot_cam, shot_kind, shot_index], shot_index)
         next_btn.click(lambda *args: move_shot(*args, 1), [shot_from, shot_to, shot_cam, shot_kind, shot_index], shot_index)
-        cam_pick.change(set_focus, cam_pick, cam_pick)
-        layout.change(lambda value: (gr.update(visible=value == '4분할'),) * 4 + (gr.update(visible=value == '1분할'),),
-                      layout, cam_imgs + [large])
+        def apply_layout(value, code):
+            single = value == '1분할'
+            if single:
+                set_focus(code)
+            tiles = tuple(gr.update(visible=not single) for _ in cam_imgs)
+            return tiles + (gr.update(visible=single, label=camera_label(code)),)
+
+        cam_pick.change(show_one, cam_pick, [layout, *cam_imgs, large])
+        layout.change(apply_layout, [layout, cam_pick], cam_imgs + [large])
         roi_visible.change(show_roi, roi_visible, cam_note)
         load_frame.click(roi_open, cam_pick, [board, safety_points, exclude_points, enabled, person, reviewed,
                                               exclude_reviewed, roi_msg])
@@ -910,9 +927,9 @@ def build_dashboard(original, engine):
                        set_msg)
 
         def jump(code):
-            set_focus(code)
-            return (code, *open_page('cameras'))
+            return (code, *show_one(code), *open_page('cameras'))
 
         for button, cam in zip(jump_buttons, original.CAMERAS):
-            button.click(lambda code=cam['code']: jump(code), None, [cam_pick, *pages, title_html])
+            button.click(lambda code=cam['code']: jump(code), None,
+                         [cam_pick, layout, *cam_imgs, large, *pages, title_html])
     return demo

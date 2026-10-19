@@ -6,7 +6,10 @@ setlocal
 rem 인터넷의 다른 PC에서 접속할 수 있는 임시 주소(https://....trycloudflare.com)를 만든다.
 rem 로그인 계정이 있어야 열린다. 이 창을 닫으면 외부 주소가 끊긴다.
 
-set "PY=C:\code\code_test\zoo\.venv\Scripts\python.exe"
+rem 파이썬: 저장소 안의 .venv → 이 PC의 기존 .venv → PATH의 python 순서로 찾는다.
+set "PY=%~dp0..\.venv\Scripts\python.exe"
+if not exist "%PY%" set "PY=C:\code\code_test\zoo\.venv\Scripts\python.exe"
+if not exist "%PY%" for %%P in (python.exe) do set "PY=%%~$PATH:P"
 set "SERVER=%~dp0twin_server.py"
 set "CF=C:\Program Files (x86)\cloudflared\cloudflared.exe"
 set "URL=http://127.0.0.1:8765"

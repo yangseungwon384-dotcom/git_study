@@ -1,0 +1,16 @@
+# ZOO-CONTROL(최종) 실행 패키지. 개발 PC(Windows 10, Python 3.14.6)에서 쓰던 버전이다.
+# 설치: python -m venv .venv  →  .venv\Scripts\python -m pip install -r requirements.txt
+fastapi==0.142.2
+uvicorn==0.54.0
+starlette==1.7.0
+websockets==17.2
+python-multipart==0.0.32
+pydantic==2.13.5
+numpy==2.5.3
+opencv-python==5.0.0.93
+pillow==12.3.0
+pandas==3.0.6
+gradio==6.29.1
+ultralytics==8.4.170
+torch==2.14.1
+torchvision==0.29.1

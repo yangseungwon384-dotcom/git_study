@@ -138,6 +138,22 @@ body.em .grid{grid-template-columns:260px minmax(0,1fr) 350px}
 
 /* cctv */
 .cams{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+/* R14: 첫 화면 맨 위의 실시간 카메라 4대 */
+.hero{border-color:var(--accent)}
+.hero h2 .hint{font-size:13px;font-weight:700;color:var(--accent);margin-left:6px}
+.hero .cams{grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.hero .cam{cursor:zoom-in;border-width:2px}
+.hero .cam:hover,.hero .cam:focus-visible{border-color:var(--accent)}
+.hero .cam .cap{font-size:13px;font-weight:700;top:6px;left:8px}
+.hero .cam .st{font-size:12px;top:6px;right:8px}
+.hero .cam .go{position:absolute;right:8px;bottom:6px;font-size:12px;font-weight:700;color:#fff;background:rgba(10,17,30,.72);border-radius:4px;padding:1px 7px}
+@media (max-width:1180px){.hero .cams{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:720px){.hero .cams{grid-template-columns:minmax(0,1fr)}}
+/* R14: 모의 데이터 영역은 점선과 옅은 톤 (점선 = 모의 규칙) */
+.panel.mockp{border-style:dashed;border-color:var(--line-2)}
+.panel.mockp h2{color:var(--muted)}
+.chip-mock{font-size:11px;font-weight:600;color:var(--muted);border:1px dashed var(--line-2);border-radius:999px;padding:0 7px;margin-left:6px}
+.scn.demoted{opacity:.9}
 .cam{position:relative;padding:0;border:1px solid var(--line-2);border-radius:5px;overflow:hidden;background:#05080f}
 .cam.sel{border-color:var(--accent);grid-column:1/-1}
 .cam.alarm{border-color:var(--crit)}
@@ -331,26 +347,15 @@ a.btn[aria-disabled="true"]{opacity:.45;pointer-events:none}
     </div>
   </section>
 
-  <section class="scn" id="scnBar" aria-label="모의 데이터 재생기">
-    <strong style="color:var(--fg)">모의 재생기</strong>
-    <label for="scnSel">시나리오
-      <select id="scnSel">
-        <option value="ele">코끼리 이탈 징후 (Level 3)</option>
-        <option value="hill">관람객 제한 구역 접근 (Level 2)</option>
-        <option value="cam">카메라 신호 지연 (Level 1)</option>
-      </select>
-    </label>
-    <button class="primary" id="scnPlay">시나리오 시작</button>
-    <button id="scnPause">일시정지</button>
-    <button id="scnReset">초기화</button>
-    <label for="scnSpeed">속도
-      <select id="scnSpeed"><option value="1">1배</option><option value="3">3배</option></select>
-    </label>
-    <label for="scnAuto"><input type="checkbox" id="scnAuto" checked> 관제요원 동작 자동 진행</label>
-    <span class="step" id="scnStep">대기 중. 시나리오를 시작하세요.</span>
-  </section>
 
   <div class="emb" id="emb" hidden></div>
+
+  <section class="panel hero" id="camHero" aria-label="실시간 카메라">
+    <h2>실시간 카메라 <small>실제 영상 분석 · 4대</small><span class="hint">▶ 카메라를 누르면 크게 봅니다</span>
+      <label class="toggle" for="popup"><input type="checkbox" id="popup" checked> 이벤트 발생 시 자동 전환</label>
+    </h2>
+    <div class="body"><div class="cams" id="cams"></div></div>
+  </section>
 
   <main class="grid" id="dash">
     <aside class="col">
@@ -417,12 +422,6 @@ a.btn[aria-disabled="true"]{opacity:.45;pointer-events:none}
         <div class="body" id="checklist"></div>
       </section>
       <section class="panel">
-        <h2>AI 지능형 CCTV
-          <label class="toggle" for="popup"><input type="checkbox" id="popup" checked> 이벤트 발생 시 자동 전환</label>
-        </h2>
-        <div class="body"><div class="cams" id="cams"></div></div>
-      </section>
-      <section class="panel">
         <h2>경보 등급별 실시간 이벤트
           <label class="toggle" for="showDone"><input type="checkbox" id="showDone"> 종료 건 표시</label>
         </h2>
@@ -431,16 +430,35 @@ a.btn[aria-disabled="true"]{opacity:.45;pointer-events:none}
     </aside>
   </main>
 
+  <section class="scn demoted" id="scnBar" aria-label="모의 데이터 재생기 (시연·교육용)">
+    <strong style="color:var(--fg)">모의 재생기</strong><span class="chip-mock">시연·교육용 · 실제 영상과 무관</span>
+    <label for="scnSel">시나리오
+      <select id="scnSel">
+        <option value="ele">코끼리 이탈 징후 (Level 3)</option>
+        <option value="hill">관람객 제한 구역 접근 (Level 2)</option>
+        <option value="cam">카메라 신호 지연 (Level 1)</option>
+      </select>
+    </label>
+    <button class="primary" id="scnPlay">시나리오 시작</button>
+    <button id="scnPause">일시정지</button>
+    <button id="scnReset">초기화</button>
+    <label for="scnSpeed">속도
+      <select id="scnSpeed"><option value="1">1배</option><option value="3">3배</option></select>
+    </label>
+    <label for="scnAuto"><input type="checkbox" id="scnAuto" checked> 관제요원 동작 자동 진행</label>
+    <span class="step" id="scnStep">대기 중. 시나리오를 시작하세요.</span>
+  </section>
+
   <section class="bottom" id="dashBottom">
-    <section class="panel">
-      <h2>타임라인 분석 <small>관람객 수(선)와 경보 발생(점), 09:00~18:00</small></h2>
+    <section class="panel mockp">
+      <h2>타임라인 분석 <small>관람객 수(선)와 경보 발생(점), 09:00~18:00</small><span class="chip-mock">모의 관람객 수</span></h2>
       <div class="body">
         <svg id="tl" viewBox="0 0 900 160" role="img" aria-label="시간대별 관람객 수와 경보 발생"></svg>
         <div class="readout" id="readout"></div>
       </div>
     </section>
-    <section class="panel">
-      <h2>무전 · 인터컴 채널 <small>채널을 누르면 송신 기록</small></h2>
+    <section class="panel mockp">
+      <h2>무전 · 인터컴 채널 <small>채널을 누르면 송신 기록</small><span class="chip-mock">모의</span></h2>
       <div class="body">
         <div id="channels" style="display:flex;flex-direction:column;gap:6px"></div>
         <div class="log num" id="radioLog"></div>
@@ -1165,7 +1183,8 @@ function renderCams(){
   /* 한 번에 한 화면만 영상을 연다. 두 화면이 동시에 스트림을 잡으면 브라우저 연결 한도를 넘는다. */
   if(VIEW!=='dash') return setHTML($('#cams'),'');
   const r=related();
-  setHTML($('#cams'), S.grid.map(cid=>camTile(cid, r.cam===cid, 'data-cam')).join(''));
+  /* R14: 첫 화면 맨 위 카메라. 누르면 카메라 탭에서 그 카메라 한 화면으로 간다. */
+  setHTML($('#cams'), S.grid.map(cid=>camTile(cid, r.cam===cid, 'data-hero').replace('</button>','<span class="go">크게 보기 ›</span></button>')).join(''));
 }
 
 /* ---------- camera-only view ---------- */
@@ -1195,7 +1214,7 @@ function camInfo(cid){
 }
 function renderCamView(){
   const on=VIEW==='cam', dash=VIEW==='dash';
-  $('#camView').hidden=!on; $('#csvView').hidden=VIEW!=='csv'; $('#aiView').hidden=VIEW!=='ai'; $('#dash').hidden=!dash; $('#dashBottom').hidden=!dash; $('#scnBar').hidden=!dash;
+  $('#camView').hidden=!on; $('#csvView').hidden=VIEW!=='csv'; $('#aiView').hidden=VIEW!=='ai'; $('#dash').hidden=!dash; $('#dashBottom').hidden=!dash; $('#scnBar').hidden=!dash; $('#camHero').hidden=!dash;
   document.querySelectorAll('[data-view]').forEach(b=>b.setAttribute('aria-selected', String(b.dataset.view===VIEW)));
   const ids=cvCams(), alarms=ids.filter(camAlarm).length, cnt=$('#camAlarmCnt');
   cnt.hidden=!alarms; cnt.textContent=alarms;
@@ -1670,6 +1689,8 @@ $('#tl').addEventListener('click',ev=>{ const r=$('#tl').getBoundingClientRect()
 $('#q').addEventListener('input',renderAnimals); $('#riskF').addEventListener('change',renderAnimals); $('#showDone').addEventListener('change',renderFeed);
 $('#scnPlay').addEventListener('click',startScenario);
 $('#baClose').addEventListener('click',closeBig);
+$('#cams').addEventListener('click',e=>{ const t=e.target.closest('[data-hero]'); if(!t) return;
+  e.stopPropagation(); CV.cam=t.dataset.hero; CV.layout='one'; CV.edit=null; setView('cam'); },true);
 $('#baOpen').addEventListener('click',()=>setBig(true));
 document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&BIG.open) closeBig(); });
 $('#baGrid').addEventListener('click',e=>{ const b=e.target.closest('[data-back]'); if(!b) return;

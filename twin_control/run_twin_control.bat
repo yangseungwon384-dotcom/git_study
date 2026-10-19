@@ -6,7 +6,10 @@ setlocal
 rem 두 번 눌러 실행한다. 이 PC에서만 열리는 관제 서버를 켜고 브라우저를 연다.
 rem 다른 PC에서도 접속하게 하려면 run_twin_control_network.bat 을 쓴다.
 
-set "PY=C:\code\code_test\zoo\.venv\Scripts\python.exe"
+rem 파이썬: 저장소 안의 .venv → 이 PC의 기존 .venv → PATH의 python 순서로 찾는다.
+set "PY=%~dp0..\.venv\Scripts\python.exe"
+if not exist "%PY%" set "PY=C:\code\code_test\zoo\.venv\Scripts\python.exe"
+if not exist "%PY%" for %%P in (python.exe) do set "PY=%%~$PATH:P"
 set "URL=http://127.0.0.1:8765"
 
 if not exist "%PY%" (

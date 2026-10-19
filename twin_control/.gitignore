@@ -2,4 +2,4 @@ twin_data/
 __pycache__/
 ai_eval_result.csv
 releases/
-replay_cache/
+*.removed
