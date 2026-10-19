@@ -64,7 +64,12 @@ CAMERAS = (
          # 사람 침입은 빨리 알린다: 경계 띠 0.5%(2.4px), 확인 시간 0.5초 (엔진 기본 2%, 1초)
          person_gate=dict(boundary_norm=0.005, min_span_sec=0.5),
          # 고객 요청 (R2 후보 검토 중 추가): 사람은 박스 가운데로 판정한다. 울타리를 넘는 순간을 발보다 먼저 잡는다.
-         person_anchor='center'),
+         person_anchor='center',
+         # R17 (2026-10-19): 평소 영상에서 레서판다 자신이 사람(0.65~0.80)으로 잡혀 침입 오탐이 10분 18건 났다.
+         # 걷는 레서판다는 가로로 긴 박스(비율 1.4 이상), 웅크린 레서판다는 작고 네모난 박스(비율 0.9~1.2, 화면 높이의 18~23%)였다.
+         # 진짜 침입자는 울타리를 넘을 때 비율 0.7~1.0이지만 화면 높이의 30% 이상, 서 있을 때는 비율 0.6 이하였다.
+         # 그래서 가로세로 비율이 wide 이상이거나, 비율이 square 이상이면서 높이가 화면의 square_max_h 미만인 사람 박스는 뺀다.
+         person_shape=dict(wide=1.3, square=0.8, square_max_h=0.27)),
 )
 BY_ID = {cam['cam_id']: cam for cam in CAMERAS}
 LABELS = dict({cam['species']: cam['label'] for cam in CAMERAS}, person='사람')
@@ -217,6 +222,7 @@ class StaticFilter:
         self.anchors = []
         self.species = []        # 최근 동물 박스 (mono, bbox). species_hold 카메라에서 사람 오판을 되돌릴 때 쓴다
         self.relabeled = 0       # 사람 → 동물로 되돌린 박스 수 (진단용)
+        self.shape_dropped = 0   # R17: 사람 모양이 아니라서 뺀 사람 박스 수 (진단용)
 
     def observe(self, bbox, confidence, mono):
         """이 박스를 기록하고, 정지 물체로 보고 빼야 하면 True."""
@@ -234,8 +240,23 @@ class StaticFilter:
         return static and confidence < STATIC_PASS
 
 
-def post_process(cam, raw, static, mono):
-    """raw는 (YOLO 클래스명, 신뢰도, [x1, y1, x2, y2])의 목록. (남길 것, 정지 물체로 뺀 박스)를 돌려준다."""
+def person_shape_ok(cam, bbox, frame_h):
+    """R17: 카메라에 person_shape가 있으면 사람 박스 모양을 본다. 사람이 아닌 모양이면 False."""
+    shape = cam.get('person_shape')
+    if not shape or not frame_h:
+        return True
+    w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    if h <= 0:
+        return False
+    ratio = w / h
+    if ratio >= shape['wide']:
+        return False
+    return not (ratio >= shape['square'] and h / frame_h < shape['square_max_h'])
+
+
+def post_process(cam, raw, static, mono, frame_h=None):
+    """raw는 (YOLO 클래스명, 신뢰도, [x1, y1, x2, y2])의 목록. (남길 것, 정지 물체로 뺀 박스)를 돌려준다.
+    frame_h는 화면 높이 (person_shape 규칙에만 쓴다)."""
     merged = []
     hold = cam.get('species_hold')
     if hold:
@@ -250,7 +271,10 @@ def post_process(cam, raw, static, mono):
             merged.append((cam['species'], confidence, bbox))
         elif name == PERSON:
             if confidence >= cam.get('person_min', PERSON_MIN):
-                merged.append((PERSON, confidence, bbox))
+                if person_shape_ok(cam, bbox, frame_h):
+                    merged.append((PERSON, confidence, bbox))
+                else:
+                    static.shape_dropped += 1
         elif name in cam['classes']:
             merged.append((cam['species'], confidence, bbox))
     merged.sort(key=lambda item: -item[1])
@@ -303,7 +327,7 @@ class DetectorProxy:
         raw = [(self.model.names[int(box.cls.item())], float(box.conf.item()),
                 [float(v) for v in box.xyxy[0].tolist()])
                for box in (result.boxes if result.boxes is not None else [])]
-        kept, ignored = post_process(cam, raw, self.static[cam['cam_id']], time.monotonic())
+        kept, ignored = post_process(cam, raw, self.static[cam['cam_id']], time.monotonic(), frame.shape[0])
         self.ignored[cam['cam_id']] = ignored
         return [types.SimpleNamespace(boxes=[_Box(self.ids[name], confidence, bbox)
                                              for name, confidence, bbox in kept])]
