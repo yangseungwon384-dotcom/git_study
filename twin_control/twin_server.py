@@ -329,9 +329,38 @@ class Guard:
         await self.app(scope, receive, send)
 
 
+ROI_SEED_FILE = HERE / 'roi_seed.json'
+
+
+def seed_roi(data_dir):
+    """사건 DB에 구역이 없는 카메라만 roi_seed.json 값으로 채운다 (새 PC에서 받아도 같은 구역). 있는 구역은 건드리지 않는다."""
+    try:
+        seed = json.loads(ROI_SEED_FILE.read_text(encoding='utf-8')).get('cameras') or {}
+    except (OSError, ValueError):
+        return []
+    data_dir.mkdir(parents=True, exist_ok=True)
+    added = []
+    with sqlite3.connect(data_dir / 'events.sqlite3') as db:
+        db.execute('CREATE TABLE IF NOT EXISTS roi(camera TEXT PRIMARY KEY, json TEXT)')
+        for camera, cfg in seed.items():
+            if db.execute('INSERT OR IGNORE INTO roi(camera, json) VALUES(?,?)',
+                          (camera, json.dumps(cfg, ensure_ascii=False))).rowcount:
+                added.append(camera)
+    return added
+
+
 def build_engine(own, rest):
     sys.path.insert(0, str(ENGINE_DIR))
     import zoo_vision_jev_new as zj
+    # 저장소를 통째로 받은 PC: 영상·zoo_vision.py·yolo26n.pt가 twin_control 바로 위 폴더에 있으면 그 폴더를 쓴다.
+    # 이 PC처럼 영상이 다른 곳(C:\code\code_test\zoo)에 있으면 엔진 기본값을 그대로 쓴다.
+    repo = HERE.parent
+    if not any(a == '--source-dir' or a.startswith('--source-dir=') for a in rest) \
+            and (repo / 'zoo_vision.py').is_file() and (repo / 'giraffe_cctv.mp4').is_file():
+        rest = [*rest, '--source-dir', str(repo)]
+    added = seed_roi(own.data_dir)
+    if added:
+        print('  기본 안전구역을 채웠습니다:', ', '.join(added))
     # R9: AI 모델과 질문 문구는 ai_model.json에서 정한다. 실행 옵션 --jev-model이 있으면 그 값이 우선한다.
     ai_cfg = twin_ai.load_ai_config()
     twin_ai.patch_questions(zj, ai_cfg['questions'])
