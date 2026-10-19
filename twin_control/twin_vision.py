@@ -581,7 +581,8 @@ def make_analyzer(zj):
                 dashboard_policy.END_REASON_KO.setdefault(reason, ko)
             self.video_plan = {cid: p for cid, p in load_video_plan(self.args.source_dir).items() if cid in self.runtime}
             for cid in self.video_plan:
-                self.runtime[cid].update(video_mode='normal', video_gen=0, video_duration=0.)
+                self.runtime[cid].update(video_mode='normal', video_gen=0, video_duration=0.,
+                                         video_ended_at=0., video_ended_by='')
 
         def switch_video(self, cid, mode):
             """R16: 영상을 'normal' 또는 'scenario'로 바꾼다. 실영상 시나리오 카메라가 아니면 None,
@@ -592,6 +593,8 @@ def make_analyzer(zj):
                 r = self.runtime[cid]
                 if r['video_mode'] == mode:
                     return False
+                if mode == 'normal':     # R18: 시나리오 도중 초기화
+                    r['video_ended_at'], r['video_ended_by'] = time.time(), 'reset'
                 r['video_mode'] = mode
                 r['video_gen'] += 1
             return True
@@ -622,6 +625,7 @@ def make_analyzer(zj):
                         if r['video_gen'] == gen:
                             r['video_mode'] = 'normal'
                             r['video_gen'] += 1
+                            r['video_ended_at'], r['video_ended_by'] = time.time(), 'done'
                     reason = 'scenario_done'
                 else:
                     reason = 'video_switch'

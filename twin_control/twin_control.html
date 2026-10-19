@@ -116,6 +116,12 @@ body.em .grid{grid-template-columns:260px minmax(0,1fr) 350px}
 .layers button{background:transparent;border:1px solid var(--line-2);border-radius:6px;padding:4px 10px;color:var(--muted)}
 .layers button[aria-pressed="true"]{background:var(--accent-bg);border-color:var(--accent);color:var(--fg)}
 .mapwrap{position:relative}
+/* R18: 지도 클릭 팝오버 (실영상 시나리오 시작) */
+.mpop{position:absolute;z-index:5;min-width:240px;max-width:min(340px,calc(100% - 8px));background:var(--bg-2,#0f1726);border:1px solid var(--accent);border-radius:8px;padding:8px 10px;box-shadow:0 6px 18px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:6px;font-size:12.5px}
+.mpop[hidden]{display:none}
+.mpop .mp-h{font-weight:700;color:var(--fg)}
+.mpop .mp-sub{font-weight:400;font-size:11px;color:var(--muted)}
+.mpop .mp-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
 #map{display:block;width:100%;height:auto;background:#0c1626;border-radius:6px}
 #map text{font-family:var(--sans)}
 .zone{cursor:pointer}
@@ -392,7 +398,8 @@ a.btn[aria-disabled="true"]{opacity:.45;pointer-events:none}
       <div class="body">
         <div class="layers" id="layers"></div>
         <div class="m3msg" id="m3msg" hidden></div>
-        <div class="mapwrap" id="map2dWrap"><svg id="map" viewBox="0 0 1000 600" role="img" aria-label="동물원 구역 지도"></svg></div>
+        <div class="mapwrap" id="map2dWrap"><svg id="map" viewBox="0 0 1000 600" role="img" aria-label="동물원 구역 지도"></svg>
+          <div class="mpop" id="mapPop" role="dialog" aria-label="실영상 시나리오 시작" hidden></div></div>
         <div class="mapwrap" id="map3dWrap" hidden><canvas id="map3d" role="img" aria-label="안내도 기준 3D 동물원 지도"></canvas>
           <span class="m3perf" id="m3perf"></span><span class="m3help">끌기: 회전 · Shift+끌기: 이동 · 휠: 확대 · 두 번 클릭: 처음 시점</span></div>
         <div class="legend" id="legend3d" hidden>
@@ -412,6 +419,8 @@ a.btn[aria-disabled="true"]{opacity:.45;pointer-events:none}
           <span><svg class="lg" viewBox="-11 -11 22 22" width="16" height="16" aria-hidden="true"><rect x="-7" y="-4" width="10" height="8" rx="2" fill="#4c9dff" stroke="#e7edf7"/><path d="M3,-2 L8,-5 L8,5 L3,2 Z" fill="#4c9dff"/></svg>실영상 카메라</span>
           <span><svg class="lg" viewBox="-11 -11 22 22" width="16" height="16" aria-hidden="true"><rect x="-7" y="-4" width="10" height="8" rx="2" fill="#0c1626" stroke="#8d9ab4" stroke-dasharray="2 2"/></svg>모의 카메라</span>
           <span><svg class="lg" viewBox="-11 -11 22 22" width="16" height="16" aria-hidden="true"><circle r="8" fill="none" stroke="#ff5f5f" stroke-width="2"/><circle cx="6" cy="-6" r="4" fill="#ff5f5f"/></svg>실제 분석 사건 (건수)</span>
+          <span><svg class="lg" viewBox="-11 -11 22 22" width="16" height="16" aria-hidden="true"><rect x="-9" y="-6" width="18" height="12" fill="none" stroke="#4c9dff" stroke-width="2.5"/></svg>실영상 시나리오 재생 중 (파란 실선)</span>
+          <span><svg class="lg" viewBox="-11 -11 22 22" width="16" height="16" aria-hidden="true"><circle r="8" fill="#ff5f5f"/><text y="4" text-anchor="middle" font-size="11" font-weight="800" fill="#fff">!</text></svg>실제 경보: 빨강 이탈 · 주황 사람 침입</span>
           <span><svg class="lg" viewBox="-11 -11 22 22" width="16" height="16" aria-hidden="true"><circle r="8" fill="#0c1626" stroke="#3ecf8e" stroke-dasharray="2 2"/><circle cy="-2" r="2.3" fill="#3ecf8e"/><path d="M-4,4 q4,-6 8,0 Z" fill="#3ecf8e"/></svg>현장 인력 · 대응조 (모의)</span>
           <span><svg class="lg" viewBox="-11 -11 22 22" width="16" height="16" aria-hidden="true"><rect x="-9" y="-6" width="18" height="12" fill="rgba(255,95,95,.35)" stroke="#ff5f5f" stroke-dasharray="3 2"/></svg>혼잡</span>
           <span><svg class="lg" viewBox="-11 -11 22 22" width="16" height="16" aria-hidden="true"><rect x="-9" y="-6" width="18" height="12" fill="rgba(242,179,61,.3)" stroke="#f2b33d" stroke-dasharray="3 2"/></svg>보통</span>
@@ -441,8 +450,6 @@ a.btn[aria-disabled="true"]{opacity:.45;pointer-events:none}
       <select id="scnSel">
         <optgroup label="모의 (이 브라우저 안에서만)">
         <option value="ele">코끼리 이탈 징후 (Level 3)</option>
-        <option value="hill">관람객 제한 구역 접근 (Level 2)</option>
-        <option value="cam">카메라 신호 지연 (Level 1)</option>
         </optgroup>
         <optgroup id="scnLive" label="실영상 (서버 영상 전환 · 모든 화면 · 사건 기록됨)" hidden></optgroup>
       </select>
@@ -651,7 +658,7 @@ function init(){
     teams:[],
     events:[], journal:[], radio:[], evSeq:0,
     ch:[{id:'CH-1',n:'보안 관제팀',st:'on'},{id:'CH-2',n:'맹수사 사육팀',st:'idle'},{id:'CH-3',n:'의료 / 구호팀',st:'off'}],
-    em:null, scn:null, autoQ:[], simIntrude:null, doorsClosed:false, viewT:null, step:'대기 중. 시나리오를 시작하세요.'
+    em:null, scn:null, autoQ:[], doorsClosed:false, viewT:null, step:'대기 중. 시나리오를 시작하세요.'
   };
   S.animals.forEach(a => a.pos = {x:a.home.x, y:a.home.y});
   addEvent({t:S.t-1605,level:1,title:'CAM-04 연결 신호 지연',desc:'통신 네트워크 자동 복구 시도 중',cam:'CAM-04',zone:'hill',status:'ack',owner:'시스템',evd:['카메라 상태 점검']},true);
@@ -761,7 +768,6 @@ function renderAnimals(){
       '<span class="r '+(loc?(a.phase==='captured'?'s-ok':'s-crit'):'s-dim')+'">'+(loc?(loc.startsWith('영상')?loc:'위치: '+loc):'방사장 내')+'</span>'+
       (v?'<span class="sub num" data-vt="'+a.id+'"></span><span class="r sub num" data-vh="'+a.id+'"></span>'
         :'<span class="sub" style="grid-column:1/-1">생체 센서 없음 · 행동 지표로 관찰</span>')+
-      (simOf(a)?'<span class="simb">'+esc(simOf(a))+'</span>':'')+
       (pi?'<span class="intr"><svg width="13" height="13" viewBox="-7 -7 14 14" aria-hidden="true"><circle cy="-3" r="2.6" fill="currentColor"/><path d="M-5,6 q5,-9 10,0 Z" fill="currentColor"/></svg>'+
         '▲ 사람 침입 관측 · '+esc(pi.cam)+' · '+pi.n+'건'+(pi.since?' ('+esc(pi.since)+'부터)':'')+'</span>':'')+
       '</button>';
@@ -868,8 +874,68 @@ function buildMap(){
       '<circle r="21" fill="none" stroke="'+MAPC.mock+'" stroke-width="1.2" stroke-dasharray="3 3" opacity=".75"/>'+animalShape(a.risk)+
       '<text text-anchor="middle" y="5" font-size="13" font-weight="700" fill="#e7edf7">'+a.mk+'</text>'+
       '<g class="bang" visibility="hidden"><circle cx="13" cy="-13" r="7" fill="'+MAPC.crit+'" stroke="#0c1626" stroke-width="1.5"/><text x="13" y="-9.5" text-anchor="middle" font-size="11" font-weight="800" fill="#fff">!</text></g></g>').join('')+'</g>';
+  h+='<g id="mLive"></g>';   /* R18: 실영상 시나리오 라벨과 실제 경보 !. 다른 표시에 가리지 않게 맨 위에 둔다 */
   m.innerHTML=h; m._built=true;
 }
+/* ---------- R18: 실영상 시나리오 · 실제 경보를 2D 지도에 (docs/map_scenario_rule.md) ----------
+   시나리오 단계는 서버 /api/state cameras[].video.phase (playing·ended·idle)를, 경보는 서버 alerts(진행 중·미확인·오탐 아님)를 그대로 따른다.
+   브라우저가 따로 추측하지 않는다. 모두 실제 분석이라 실선으로 그린다 (v8 규칙). */
+let LIVESCN = [];   // [{camera, title}] 실영상 시나리오가 있는 카메라 (/api/scenario-video)
+const ALERT_KO = {exit:'이탈', intrusion:'사람 침입'};
+function liveCamInfo(c){
+  if(!c.live||!LIVE.on) return null;
+  const st=LIVE.cams.find(x=>x.id===c.live), v=st&&st.video;
+  const al=(LIVE.alerts||[]).filter(a=>a.camera===c.live);
+  return {v, alert: al.some(a=>a.kind==='exit') ? 'exit' : al.length ? 'intrusion' : null, n: al.reduce((k,a)=>k+a.count,0)};
+}
+function liveZone(zid){
+  let alert=null, playing=false;
+  CAMS.filter(c=>c.zone===zid).forEach(c=>{ const i=liveCamInfo(c); if(!i) return;
+    if(i.alert==='exit'||(i.alert&&!alert)) alert=i.alert; if(i.v&&i.v.phase==='playing') playing=true; });
+  return {alert, playing};
+}
+function renderMapLive(){
+  /* 문구는 카메라 옆 바깥쪽(지도 왼쪽 절반은 왼쪽, 오른쪽 절반은 오른쪽)에, 경보 !는 카메라 바로 위에 둔다 */
+  const lab=(x,y,txt,fill,anchor)=>'<text x="'+x+'" y="'+y+'" text-anchor="'+anchor+'" font-size="12.5" font-weight="700" fill="'+fill+'" stroke="'+MAPC.halo+'" stroke-width="4" paint-order="stroke">'+esc(txt)+'</text>';
+  const out=[];
+  CAMS.forEach(c=>{
+    const i=liveCamInfo(c); if(!i) return;
+    const v=i.v, left=c.x<500, lx=left?c.x-20:c.x+20, anchor=left?'end':'start';
+    if(v&&v.phase==='playing'){
+      out.push('<circle cx="'+c.x+'" cy="'+c.y+'" r="17" fill="none" stroke="'+MAPC.live+'" stroke-width="3"/>');
+      out.push(lab(lx, c.y+5, '▶ '+v.title+' 재생 중'+(v.duration?' '+Math.min(Math.round(v.sec),Math.round(v.duration))+'/'+Math.round(v.duration)+'초':''), '#cfe3ff', anchor));
+    } else if(v&&v.phase==='ended'){
+      out.push(lab(lx, c.y+5, '■ '+v.title+(v.ended_by==='reset'?' 초기화됨':' 끝남'), '#c9d3c2', anchor));
+    }
+    if(i.alert){
+      const col=i.alert==='exit'?MAPC.crit:MAPC.warn, ax=c.x, ay=c.y-24;
+      out.push('<g><title>실제 경보: '+c.id+' '+ALERT_KO[i.alert]+' '+i.n+'건</title><circle cx="'+ax+'" cy="'+ay+'" r="10" fill="'+col+'" stroke="#0c1626" stroke-width="2" class="pulse"/>'+
+        '<text x="'+ax+'" y="'+(ay+5)+'" text-anchor="middle" font-size="14" font-weight="800" fill="'+(i.alert==='exit'?'#fff':'#1a1205')+'">!</text></g>');
+      out.push(lab(ax, ay-15, ALERT_KO[i.alert]+' '+i.n+'건', col, 'middle'));
+    }
+  });
+  setHTML($('#mLive'), out.join(''));
+}
+/* ---------- R18 I6: 지도에서 구역·카메라를 누르면 그 자리의 실영상 시나리오를 시작하는 팝오버 ---------- */
+function mapPopFor(type, id){
+  const cams = type==='cam' ? CAMS.filter(c=>c.id===id) : CAMS.filter(c=>c.zone===id);
+  return cams.map(c=>({c, s:LIVESCN.find(x=>x.camera===c.live)})).filter(x=>x.s);
+}
+function openMapPop(ev, type, id){
+  const pop=$('#mapPop'), list=mapPopFor(type, id);
+  if(!list.length||!LIVE.on){ pop.hidden=true; return; }
+  const wrap=$('#map2dWrap').getBoundingClientRect();
+  pop.innerHTML='<div class="mp-h">실영상 시나리오 <span class="mp-sub">서버 영상 전환 · 모든 화면 · 사건 기록됨</span></div>'+list.map(({c,s})=>{
+    const v=(LIVE.cams.find(x=>x.id===c.live)||{}).video, playing=v&&v.phase==='playing';
+    return '<div class="mp-row"><span>'+esc(c.id)+' '+esc(s.title)+'</span>'+(playing
+      ? '<button class="btn sm" disabled>재생 중 '+(v.duration?Math.round(v.sec)+'/'+Math.round(v.duration)+'초':'')+'</button>'
+      : '<button class="btn sm primary" data-mapscn="'+esc(c.live)+'">▶ 시작</button>')+'</div>';
+  }).join('')+'<div class="mp-row"><span class="mp-sub">시작하면 그 카메라가 위험 영상으로 바뀝니다.</span><button class="btn sm" data-mappop="close">닫기</button></div>';
+  pop.hidden=false;
+  const x=Math.min(Math.max(ev.clientX-wrap.left+12, 4), wrap.width-pop.offsetWidth-4), y=Math.min(Math.max(ev.clientY-wrap.top+12, 4), wrap.height-pop.offsetHeight-4);
+  pop.style.left=Math.max(4,x)+'px'; pop.style.top=Math.max(4,y)+'px';
+}
+const closeMapPop = () => { const p=$('#mapPop'); if(p) p.hidden=true; };
 function renderMap2d(){
   const m=$('#map'); if(!m._built) buildMap();
   const r=related(), L=S.layers;
@@ -878,8 +944,11 @@ function renderMap2d(){
     hz.setAttribute('fill', L.heat ? (g[1]==='crit'?'rgba(255,95,95,.32)':g[1]==='warn'?'rgba(242,179,61,.22)':'transparent') : 'transparent');
     hz.setAttribute('stroke', L.heat&&g[1]!=='ok' ? (g[1]==='crit'?MAPC.crit:MAPC.warn) : 'none');
     hz.setAttribute('stroke-dasharray', '6 4');
-    p.setAttribute('stroke-width', r.zone===z.id?3.5:1.5);
-    p.style.stroke = r.zone===z.id ? '#ffffff' : (S.simIntrude===z.id ? MAPC.warn : '');
+    /* R18: 실제 경보(빨강 이탈·주황 침입) > 선택(흰색) > 실영상 시나리오 재생 중(파란 실선) 순서로 구역 테두리를 칠한다.
+       경보는 선택해 둔 구역에서도 가려지지 않아야 한다. */
+    const zl=liveZone(z.id);
+    p.setAttribute('stroke-width', r.zone===z.id||zl.alert||zl.playing ? 3.5 : 1.5);
+    p.style.stroke = zl.alert==='exit' ? MAPC.crit : zl.alert ? MAPC.warn : r.zone===z.id ? '#ffffff' : zl.playing ? MAPC.live : '';
     $('#zt-'+z.id).textContent = L.heat ? '관람객 약 '+Math.round(S.zones[z.id])+'명 · '+g[0] : '';
   });
   $('#mZones').style.display = L.terrain?'':'none'; $('#mRoads').style.display = L.terrain?'':'none';
@@ -901,6 +970,7 @@ function renderMap2d(){
     $('#ce-'+c.id).setAttribute('visibility', n||(live&&camAlarm(c.id)) ? 'visible' : 'hidden');
     $('#cb-'+c.id).setAttribute('visibility', n ? 'visible' : 'hidden'); $('#cbt-'+c.id).textContent = n>9?'9+':n||'';
   });
+  renderMapLive();
   DOORS.forEach(d=>{ const b=$('#door-'+d.id); b.setAttribute('fill', S.doorsClosed?MAPC.crit:'#0c1626'); b.setAttribute('stroke', S.doorsClosed?MAPC.crit:MAPC.wall); $('#doort-'+d.id).textContent = d.n+(S.doorsClosed?' (폐쇄)':''); });
   $('#mGps').style.display = L.gps?'':'none';
   S.animals.forEach(a=>{ const e=$('#am-'+a.id), al=animalAlarm(a);
@@ -1168,7 +1238,7 @@ function detections(cid){
   if(cid==='CAM-07') return [{l:'호랑이',c:.96,x:50+w*4,y:48,w:26,h:16,k:'a'},{l:'곰',c:.91,x:104,y:46,w:20,h:18,k:'a'}];
   if(cid==='CAM-03') return [{l:'사람',c:.9,x:30+w*5,y:52,w:8,h:20,k:'p'},{l:'사람',c:.87,x:70-w*4,y:50,w:8,h:22,k:'p'},{l:'사람',c:.92,x:112+w*3,y:54,w:8,h:19,k:'p'}];
   if(cid==='CAM-12') return [{l:'사람',c:.89,x:44+w*3,y:54,w:8,h:20,k:'p'},{l:'사람',c:.85,x:96,y:52,w:8,h:21,k:'p'}];
-  return [{l:'사람',c:.9,x:40+w*4,y:52,w:8,h:20,k:'p'},{l:'사람',c:.93,x:S.simIntrude==='hill'?126:92,y:50,w:8,h:22,k:S.simIntrude==='hill'?'warn':'p'}];
+  return [{l:'사람',c:.9,x:40+w*4,y:52,w:8,h:20,k:'p'},{l:'사람',c:.93,x:92,y:50,w:8,h:22,k:'p'}];
 }
 let VIEW = 'dash';
 const CV = {layout:'grid', cam:null, edit:null};
@@ -1541,8 +1611,8 @@ function evAction(kind,id){
   const e=allEvents().find(x=>x.id===id); if(!e) return;
   if(e.live) return liveAction(kind,e);
   if(kind==='ack'){ e.status='ack'; e.owner=e.zone==='hill'?'보안 2조':'관제요원'; log(e.title+' 확인, 담당 '+e.owner); }
-  if(kind==='close'){ e.status='closed'; if(e.sim==='hill') S.simIntrude=null; log(e.title+' 종료'); }
-  if(kind==='false'){ e.status='false'; e.note='사유: 현장 확인 결과 이상 없음'; if(e.animal==='ele'){ A('ele').phase='normal'; } if(e.sim==='hill') S.simIntrude=null; S.autoQ=[]; log(e.title+' 오탐 처리, 사유 기록'); S.step='오탐 처리로 종료. 사유는 재학습 데이터로 저장됩니다.'; }
+  if(kind==='close'){ e.status='closed'; log(e.title+' 종료'); }
+  if(kind==='false'){ e.status='false'; e.note='사유: 현장 확인 결과 이상 없음'; if(e.animal==='ele'){ A('ele').phase='normal'; } S.autoQ=[]; log(e.title+' 오탐 처리, 사유 기록'); S.step='오탐 처리로 종료. 사유는 재학습 데이터로 저장됩니다.'; }
   if(kind==='real'){ confirmReal(e); }
   renderAll();
 }
@@ -1634,17 +1704,6 @@ function showReport(){
 
 /* ---------- scenario player ---------- */
 function auto(delay,fn){ S.autoQ.push({at:S.t+delay,fn}); }
-/* R12: 시나리오-카메라 매핑. 서버의 scenario_map.json을 시작할 때 읽고, 못 읽으면 같은 값을 쓴다. */
-let SIMMAP = {hill:{camera:'CAM-05',animal:'panda',zone:'farm',place:'레서판다 방사장 펜스',title:'관람객 제한 구역 울타리 접근'},
-              cam:{camera:'CAM-07',animal:'tiger',zone:'safari',delay_sec:2.4,title:'연결 신호 지연'}};
-if(location.protocol==='http:'||location.protocol==='https:')
-  fetch('/api/scenario-map',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(m=>{ if(m&&m.hill&&m.cam) SIMMAP={hill:Object.assign({},SIMMAP.hill,m.hill),cam:Object.assign({},SIMMAP.cam,m.cam)}; }).catch(()=>{});
-/* 그 동물 카드에 걸린 진행 중 모의 사건 (점선 보라 배지). 실제 사건·판정과는 따로다. */
-function simOf(a){
-  const e=S.events.filter(x=>x.sim&&x.animal===a.id&&(x.status==='new'||x.status==='ack'));
-  if(!e.length) return null;
-  return e.map(x=>'◇ 모의: '+(x.sim==='cam'?x.cam+' 신호 지연 '+(SIMMAP.cam.delay_sec)+'초':x.title+' ('+x.cam+')')).join(' · ');
-}
 const SCN = {
   ele:[
     [2,()=>{ S.step='1/8 평상시. 코끼리 체온이 주의 범위입니다.'; select('animal','ele'); }],
@@ -1656,20 +1715,6 @@ const SCN = {
       addEvent({level:3,title:'코끼리 펜스 접근 및 이탈 징후',desc:'초식동물 숲 펜스 센서 가동 및 긴급 출동 요청',zone:'forest',cam:'CAM-01',animal:'ele',evd:['스마트락 G-F2 개방','펜스 진동 센서 F-12','CAM-01 동물 검출 0.94']});
       S.step='4/8 서로 다른 근거 3건 일치, Level 3 사건 생성. 영상으로 확인하세요.';
       auto(6,()=>{ const e=S.events.find(x=>x.level===3&&x.status==='new'); if(e) evAction('real',e.id); }); }]
-  ],
-  /* R12: 두 시나리오가 걸리는 카메라·동물·구역은 scenario_map.json(SIMMAP)에서 정한다. 모의 사건이라 sim 표시가 붙는다. */
-  hill:[
-    [3,()=>{ const m=SIMMAP.hill; S.simIntrude=m.zone;
-      addEvent({level:2,title:m.title,desc:m.place+' 인근 무단 접근 감지 (모의)',zone:m.zone,cam:m.camera,animal:m.animal,sim:'hill',evd:[m.camera+' 사람 검출 0.93 (모의)','가상 경계선 침범 (모의)']});
-      S.step='1/3 관람객이 '+m.place+' 경계선을 넘었습니다 (Level 2, 모의 · '+m.camera+').';
-      auto(6,()=>{ const e=S.events.find(x=>x.sim==='hill'&&x.status==='new'); if(e){ evAction('ack',e.id); radio('관제 → CH-1: 보안 2조, '+m.place+' 확인 바람'); S.step='2/3 확인 후 보안 2조에 배정.'; } });
-      auto(16,()=>{ const e=S.events.find(x=>x.sim==='hill'&&x.status==='ack'); if(e){ evAction('close',e.id); radio('CH-1 보안 2조: 관람객 안내 완료'); S.step='3/3 현장 안내 완료, 종료.'; S.scn=null; } }); }]
-  ],
-  cam:[
-    [3,()=>{ const m=SIMMAP.cam; S.camState[m.camera]='delay';
-      addEvent({level:1,title:m.camera+' '+m.title,desc:'통신 네트워크 자동 복구 시도 중 (모의)',zone:m.zone,cam:m.camera,animal:m.animal,sim:'cam',status:'ack',owner:'시스템',evd:['프레임 지연 '+m.delay_sec+'초 (모의)']});
-      S.step='1/2 '+m.camera+' 신호 지연 (Level 1, 모의). 자동 복구를 시도합니다.'; }],
-    [18,()=>{ const m=SIMMAP.cam; delete S.camState[m.camera]; const e=S.events.find(x=>x.sim==='cam'&&x.status==='ack'); if(e){ e.status='closed'; e.note='자동 복구'; } log(m.camera+' 자동 복구'); S.step='2/2 자동 복구 완료, 종료.'; S.scn=null; }]
   ]
 };
 function startScenario(){
@@ -1703,6 +1748,10 @@ function renderAll(){ renderTop(); renderLayers(); renderAnimals(); liveVitals()
 document.addEventListener('click',ev=>{
   const t=ev.target, c=s=>t.closest(s);
   let el;
+  if((el=c('[data-mapscn]'))){ closeMapPop(); return startLiveScenario(el.dataset.mapscn); }
+  if(c('[data-mappop]')) return closeMapPop();
+  if(c('#mapPop')) return;
+  closeMapPop();
   if((el=c('[data-ev]'))){ ev.stopPropagation(); return evAction(el.dataset.ev,el.dataset.id); }
   if((el=c('[data-rv]'))){ ev.stopPropagation(); const base='/api/events/'+encodeURIComponent(el.dataset.id);
     return post(base+'/review',{label:el.dataset.rv,note:'CSV 기록 탭에서 판정'}).then(()=>post(base+'/ack',{name:'관제요원'})).then(loadCsv)
@@ -1721,14 +1770,14 @@ document.addEventListener('click',ev=>{
   if((el=c('[data-cvcam]'))){ if(CV.layout==='one') CV.layout='grid'; else { CV.layout='one'; CV.cam=el.dataset.cvcam; } return renderAll(); }
   if((el=c('[data-layer]'))){ S.layers[el.dataset.layer]=!S.layers[el.dataset.layer]; return renderAll(); }
   if((el=c('[data-animal]'))) return select('animal',el.dataset.animal);
-  if((el=c('[data-cam]'))) return select('cam',el.dataset.cam);
+  if((el=c('[data-cam]'))){ select('cam',el.dataset.cam); if(c('#map')) openMapPop(ev,'cam',el.dataset.cam); return; }
   if((el=c('[data-event]'))) return select('event',el.dataset.event);
-  if((el=c('[data-zone]'))) return select('zone',el.dataset.zone);
+  if((el=c('[data-zone]'))){ select('zone',el.dataset.zone); if(c('#map')) openMapPop(ev,'zone',el.dataset.zone); return; }
   if((el=c('[data-ch]'))){ const ch=S.ch.find(x=>x.id===el.dataset.ch); if(ch.st==='off') radio(ch.id+' 오프라인: 송신 실패, 유선 인터컴으로 연락하세요'); else { ch.st='on'; radio('관제 → '+ch.id+' '+ch.n+': 송신'); } return renderRadio(); }
   if(t.id==='live'){ S.viewT=null; return renderTimeline(); }
   if(t.id==='ov') closeDialog();
 });
-document.addEventListener('keydown',ev=>{ if(ev.key==='Escape') closeDialog(); if(ev.key==='Enter'&&ev.target.matches('[data-event]')) select('event',ev.target.dataset.event); });
+document.addEventListener('keydown',ev=>{ if(ev.key==='Escape'){ closeDialog(); closeMapPop(); } if(ev.key==='Enter'&&ev.target.matches('[data-event]')) select('event',ev.target.dataset.event); });
 $('#tl').addEventListener('click',ev=>{ const r=$('#tl').getBoundingClientRect(), x=(ev.clientX-r.left)/r.width*900; const t=T(9,0)+(x-44)/836*9*3600; S.viewT=Math.max(T(9,0),Math.min(S.t,t)); renderTimeline(); });
 $('#q').addEventListener('input',renderAnimals); $('#riskF').addEventListener('change',renderAnimals); $('#showDone').addEventListener('change',renderFeed);
 $('#scnPlay').addEventListener('click',startScenario);
@@ -1759,6 +1808,7 @@ $('#scnSpeed').addEventListener('change',e=>{ S.speed=+e.target.value; });
 init(); if(location.hash==='#cameras') VIEW='cam'; if(location.hash==='#csv') VIEW='csv'; if(location.hash==='#ai') VIEW='ai';
 fetch('/api/scenario-video').then(r=>r.ok?r.json():null).then(d=>{
   if(!d||!d.cameras||!d.cameras.length) return;
+  LIVESCN=d.cameras;
   const g=$('#scnLive'); g.innerHTML=d.cameras.map(x=>'<option value="live:'+esc(x.camera)+'">'+esc(x.title)+'</option>').join(''); g.hidden=false;
 }).catch(()=>{});
 $('#csvCam').insertAdjacentHTML('beforeend', CAMS.filter(c=>c.live).map(c=>'<option value="'+c.live+'">'+c.id+' '+c.name+'</option>').join(''));
