@@ -73,7 +73,6 @@ MAP_FILE = HERE / 'map' / 'naturepark.json'
 # R11: 카메라가 맡은 동물. 사람 침입 사건도 그 동물 카드에 표시한다.
 CAMERA_ANIMAL_FILE = HERE / 'camera_animal.json'
 # R12: 모의 재생기 시나리오가 걸리는 카메라·동물. 화면이 시작할 때 읽는다.
-SCENARIO_MAP_FILE = HERE / 'scenario_map.json'
 
 
 def load_camera_animals():
@@ -137,6 +136,7 @@ PAGE_HEAD = ('<!doctype html><html lang="ko"><head><meta charset="utf-8">'
 FRAME_SEC = 0.1    # 화면용 영상 갱신 주기 (R5: 0.2 → 0.1. 영상은 최신 프레임, 박스는 마지막 분석 결과)
 STATE_SEC = 0.5    # 상태 전송 주기
 EVENT_LIMIT = 60   # 화면에 넘기는 오늘 사건 수 (최근 것부터)
+VIDEO_ENDED_SEC = 30   # R18: 실영상 시나리오가 끝난 뒤 지도에 '끝남'을 보여 주는 시간
 EVENT_ID = re.compile(r'^[0-9a-f]{32}$')
 REVIEW_LABELS = ('실제 위험', '오탐', '판단 보류')
 # R2 (2026-10-15): 사람 진입 알림 문장에서 '(진입 확정 아님)'을 뺀다. 이미 저장된 사건도 보여 줄 때 뺀다.
@@ -517,6 +517,14 @@ def create_app(zj, engine, args, accounts):
             animal=camera_animal.get(row.get('camera_id')),
             has_snapshot=bool(path and Path(path).is_file()), ai=ai)
 
+    def video_phase(r):
+        """R18: 지도가 따르는 시나리오 단계. playing = 위험 영상 재생 중, ended = 끝난 지 VIDEO_ENDED_SEC 이내, idle = 평소 영상."""
+        if r['video_mode'] == 'scenario':
+            return 'playing'
+        if r['video_ended_at'] and time.time() - r['video_ended_at'] <= VIDEO_ENDED_SEC:
+            return 'ended'
+        return 'idle'
+
     def state():
         current = zj.now()
         cameras = []
@@ -538,7 +546,10 @@ def create_app(zj, engine, args, accounts):
                                      track_id=d['track_id']) for d in rendered[2]] if fresh else [],
                     # R16: 실영상 시나리오 카메라만. normal = 평소 영상, scenario = 시나리오(위험) 영상
                     video=dict(mode=r['video_mode'], title=plan['title'], sec=round(r['video_sec'], 1),
-                               duration=round(r['video_duration'], 1)) if plan else None))
+                               duration=round(r['video_duration'], 1), phase=video_phase(r),
+                               ended_by=r['video_ended_by'] or None,
+                               ended_ago=round(time.time() - r['video_ended_at']) if r['video_ended_at'] else None)
+                    if plan else None))
         rows = engine.db.list_records(day_from=current.date().isoformat(), limit=5000)
         return dict(now=current.isoformat(),
                     now_sec=current.hour * 3600 + current.minute * 60 + current.second,
@@ -666,13 +677,6 @@ def create_app(zj, engine, args, accounts):
     @app.get('/api/state')
     def api_state():
         return state()
-
-    @app.get('/api/scenario-map')
-    def api_scenario_map():
-        try:
-            return json.loads(SCENARIO_MAP_FILE.read_text(encoding='utf-8'))
-        except (OSError, ValueError):
-            return {}
 
     @app.get('/api/scenario-video')
     def api_scenario_video():

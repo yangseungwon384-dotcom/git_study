@@ -1,5 +1,7 @@
 # 모의 재생기 시나리오 연결 (v12 후보, R12)
 
+> **v19(R18)에서 폐지:** "관람객 제한 구역 접근 (Level 2)"과 "카메라 신호 지연 (Level 1)" 모의 시나리오를 지웠다. 모의 재생기에는 "코끼리 이탈 징후 (Level 3)"만 남는다. `scenario_map.json`은 `scenario_map.json.removed`로 보관했고 `/api/scenario-map`도 없앴다. 아래는 v12~v18 기록이다. 지금 기준은 `docs/map_scenario_rule.md`.
+
 2026-10-16 · 대상: 통합 관제 탭 위쪽 "모의 재생기"
 
 ## 바뀐 연결 (`scenario_map.json`)
