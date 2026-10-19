@@ -26,7 +26,7 @@ ANALYSIS_FPS = 3.0
 CACHE = HERE / 'replay_cache'
 # 'v1'(이전 규칙)으로 돌릴 때 빼는 카메라별 설정. 엔진 기본 규칙과 같아진다.
 RULE_KEYS = ('person_min', 'person_gate', 'person_anchor', 'exit_samples', 'exit_sec', 'boundary_norm',
-             'species_hold', 'track_jump')
+             'species_hold', 'track_jump', 'person_shape')
 
 
 def detections(cam, weights, width=960):
@@ -100,7 +100,7 @@ def replay(cam, data, cfg, rules, loops, start=0.0):
             w, h = frame['size']
             poly = (np.asarray(cfg['polygon'], np.float32) * [w - 1, h - 1]).astype(np.int32)
             raw = [tuple(r) for r in frame['raw']]
-            kept, _ = twin_vision.post_process(rule_cam, raw, static, t)
+            kept, _ = twin_vision.post_process(rule_cam, raw, static, t, h)
             dets = tracker.update([dict(name=n, confidence=c, bbox=[int(v) for v in b]) for n, c, b in kept])
             for d in dets:
                 name, tid = d['name'], d['track_id']
@@ -132,6 +132,8 @@ def replay(cam, data, cfg, rules, loops, start=0.0):
                                        delay=round(t - s['crossed'], 2) if s['crossed'] is not None else None))
     if static.relabeled:
         print(f'   [{rules}] 사람 → {cam["species"]} 되돌림 {static.relabeled}건')
+    if static.shape_dropped:
+        print(f'   [{rules}] 사람 모양이 아니라서 뺀 사람 박스 {static.shape_dropped}건')
     return events
 
 

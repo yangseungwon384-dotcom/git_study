@@ -525,6 +525,7 @@ def create_app(zj, engine, args, accounts):
                 rendered, cfg = r['rendered'], r['cfg']
                 fresh = bool(rendered and rendered[1] == r['session']
                              and time.monotonic() - rendered[0] <= args.max_gap)
+                plan = engine.video_plan.get(cid)
                 cameras.append(dict(
                     id=cid, title=r['cam']['title'], connected=r['frame'] is not None,
                     error=r['error'], fps=round(r['analysis_fps'], 1),
@@ -534,7 +535,10 @@ def create_app(zj, engine, args, accounts):
                     detections=[dict(name=d['name'], label=twin_vision.label_of(d['name']),
                                      confidence=round(d['confidence'], 2),
                                      danger=bool(d['danger']), zone=d.get('zone') or '',
-                                     track_id=d['track_id']) for d in rendered[2]] if fresh else []))
+                                     track_id=d['track_id']) for d in rendered[2]] if fresh else [],
+                    # R16: 실영상 시나리오 카메라만. normal = 평소 영상, scenario = 시나리오(위험) 영상
+                    video=dict(mode=r['video_mode'], title=plan['title'], sec=round(r['video_sec'], 1),
+                               duration=round(r['video_duration'], 1)) if plan else None))
         rows = engine.db.list_records(day_from=current.date().isoformat(), limit=5000)
         return dict(now=current.isoformat(),
                     now_sec=current.hour * 3600 + current.minute * 60 + current.second,
@@ -669,6 +673,33 @@ def create_app(zj, engine, args, accounts):
             return json.loads(SCENARIO_MAP_FILE.read_text(encoding='utf-8'))
         except (OSError, ValueError):
             return {}
+
+    @app.get('/api/scenario-video')
+    def api_scenario_video():
+        """R16: 실영상 시나리오가 있는 카메라 목록 (재생기 항목)."""
+        return dict(cameras=[dict(camera=cid, title=p['title']) for cid, p in engine.video_plan.items()])
+
+    def video_request(request):
+        if not local_origin(request.headers):
+            raise HTTPException(403, '이 관제 화면에서만 요청할 수 있습니다.')
+        return need(request, *ROLES)
+
+    @app.post('/api/scenario-video/reset')
+    def scenario_video_reset(request: Request):
+        """R16: 시나리오 영상이 돌고 있는 카메라를 모두 평소 영상으로 되돌린다."""
+        video_request(request)
+        return dict(reset=[cid for cid in engine.video_plan if engine.switch_video(cid, 'normal')])
+
+    @app.post('/api/scenario-video/{camera_id}/start')
+    def scenario_video_start(camera_id: str, request: Request):
+        """R16: 그 카메라를 시나리오 영상으로 바꾼다. 이미 시나리오 영상이면 무시한다(started=false)."""
+        me = video_request(request)
+        changed = engine.switch_video(camera_id, 'scenario')
+        if changed is None:
+            raise HTTPException(404, '실영상 시나리오가 없는 카메라입니다.')
+        if changed:
+            print(f'  [실영상 시나리오] {camera_id} 시작 ({me["name"] or "이 PC"})')
+        return dict(camera=camera_id, started=changed)
 
     @app.get('/api/map')
     def api_map():

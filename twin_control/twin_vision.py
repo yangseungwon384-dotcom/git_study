@@ -14,6 +14,7 @@
 """
 from copy import deepcopy
 import json
+from pathlib import Path
 from dataclasses import replace
 import statistics
 import time
@@ -63,7 +64,12 @@ CAMERAS = (
          # 사람 침입은 빨리 알린다: 경계 띠 0.5%(2.4px), 확인 시간 0.5초 (엔진 기본 2%, 1초)
          person_gate=dict(boundary_norm=0.005, min_span_sec=0.5),
          # 고객 요청 (R2 후보 검토 중 추가): 사람은 박스 가운데로 판정한다. 울타리를 넘는 순간을 발보다 먼저 잡는다.
-         person_anchor='center'),
+         person_anchor='center',
+         # R17 (2026-10-19): 평소 영상에서 레서판다 자신이 사람(0.65~0.80)으로 잡혀 침입 오탐이 10분 18건 났다.
+         # 걷는 레서판다는 가로로 긴 박스(비율 1.4 이상), 웅크린 레서판다는 작고 네모난 박스(비율 0.9~1.2, 화면 높이의 18~23%)였다.
+         # 진짜 침입자는 울타리를 넘을 때 비율 0.7~1.0이지만 화면 높이의 30% 이상, 서 있을 때는 비율 0.6 이하였다.
+         # 그래서 가로세로 비율이 wide 이상이거나, 비율이 square 이상이면서 높이가 화면의 square_max_h 미만인 사람 박스는 뺀다.
+         person_shape=dict(wide=1.3, square=0.8, square_max_h=0.27)),
 )
 BY_ID = {cam['cam_id']: cam for cam in CAMERAS}
 LABELS = dict({cam['species']: cam['label'] for cam in CAMERAS}, person='사람')
@@ -216,6 +222,7 @@ class StaticFilter:
         self.anchors = []
         self.species = []        # 최근 동물 박스 (mono, bbox). species_hold 카메라에서 사람 오판을 되돌릴 때 쓴다
         self.relabeled = 0       # 사람 → 동물로 되돌린 박스 수 (진단용)
+        self.shape_dropped = 0   # R17: 사람 모양이 아니라서 뺀 사람 박스 수 (진단용)
 
     def observe(self, bbox, confidence, mono):
         """이 박스를 기록하고, 정지 물체로 보고 빼야 하면 True."""
@@ -233,8 +240,23 @@ class StaticFilter:
         return static and confidence < STATIC_PASS
 
 
-def post_process(cam, raw, static, mono):
-    """raw는 (YOLO 클래스명, 신뢰도, [x1, y1, x2, y2])의 목록. (남길 것, 정지 물체로 뺀 박스)를 돌려준다."""
+def person_shape_ok(cam, bbox, frame_h):
+    """R17: 카메라에 person_shape가 있으면 사람 박스 모양을 본다. 사람이 아닌 모양이면 False."""
+    shape = cam.get('person_shape')
+    if not shape or not frame_h:
+        return True
+    w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    if h <= 0:
+        return False
+    ratio = w / h
+    if ratio >= shape['wide']:
+        return False
+    return not (ratio >= shape['square'] and h / frame_h < shape['square_max_h'])
+
+
+def post_process(cam, raw, static, mono, frame_h=None):
+    """raw는 (YOLO 클래스명, 신뢰도, [x1, y1, x2, y2])의 목록. (남길 것, 정지 물체로 뺀 박스)를 돌려준다.
+    frame_h는 화면 높이 (person_shape 규칙에만 쓴다)."""
     merged = []
     hold = cam.get('species_hold')
     if hold:
@@ -249,7 +271,10 @@ def post_process(cam, raw, static, mono):
             merged.append((cam['species'], confidence, bbox))
         elif name == PERSON:
             if confidence >= cam.get('person_min', PERSON_MIN):
-                merged.append((PERSON, confidence, bbox))
+                if person_shape_ok(cam, bbox, frame_h):
+                    merged.append((PERSON, confidence, bbox))
+                else:
+                    static.shape_dropped += 1
         elif name in cam['classes']:
             merged.append((cam['species'], confidence, bbox))
     merged.sort(key=lambda item: -item[1])
@@ -302,7 +327,7 @@ class DetectorProxy:
         raw = [(self.model.names[int(box.cls.item())], float(box.conf.item()),
                 [float(v) for v in box.xyxy[0].tolist()])
                for box in (result.boxes if result.boxes is not None else [])]
-        kept, ignored = post_process(cam, raw, self.static[cam['cam_id']], time.monotonic())
+        kept, ignored = post_process(cam, raw, self.static[cam['cam_id']], time.monotonic(), frame.shape[0])
         self.ignored[cam['cam_id']] = ignored
         return [types.SimpleNamespace(boxes=[_Box(self.ids[name], confidence, bbox)
                                              for name, confidence, bbox in kept])]
@@ -517,6 +542,26 @@ def geometry_evidence(engine, cid, d, s, cfg, stamp):
     return out
 
 
+SCENARIO_VIDEO_FILE = Path(__file__).resolve().parent / 'scenario_video.json'
+VIDEO_END_REASONS = {'video_switch': '영상 전환', 'scenario_done': '시나리오 영상 끝'}
+
+
+def load_video_plan(source_dir):
+    """R16: scenario_video.json에서 평소·시나리오 영상을 읽는다. 평소 영상 파일이 없는 카메라는 빼서 이전처럼 돌게 한다."""
+    try:
+        cams = json.loads(SCENARIO_VIDEO_FILE.read_text(encoding='utf-8')).get('cameras') or {}
+    except (OSError, ValueError):
+        return {}
+    plan = {}
+    for cid, cfg in cams.items():
+        normal, scenario = Path(source_dir) / cfg.get('normal', ''), Path(source_dir) / cfg.get('scenario', '')
+        if not (cfg.get('normal') and normal.is_file() and scenario.is_file()):
+            print(f'  [실영상 시나리오] {cid}: 평소·시나리오 영상 파일이 없어 이전처럼 한 영상만 반복합니다.')
+            continue
+        plan[cid] = dict(normal=normal, scenario=scenario, title=cfg.get('title') or cid)
+    return plan
+
+
 def make_analyzer(zj):
     """엔진의 LinkedAnalyzer에서 모델과 화면 그리기만 바꾼 분석기."""
 
@@ -531,6 +576,122 @@ def make_analyzer(zj):
             # R6: 판단 요청 담당을 바꿔 끼운다 (실패 원인 구분, 자동 재시도, 늦은 답 붙이기). 스레드는 start()에서 켜진다.
             import twin_ai
             self.worker = twin_ai.make_worker(zj)(self)
+            # R16: 실영상 시나리오. 여기 있는 카메라만 평소 영상과 시나리오 영상을 오간다. 나머지는 엔진 재생 그대로.
+            for reason, ko in VIDEO_END_REASONS.items():
+                dashboard_policy.END_REASON_KO.setdefault(reason, ko)
+            self.video_plan = {cid: p for cid, p in load_video_plan(self.args.source_dir).items() if cid in self.runtime}
+            for cid in self.video_plan:
+                self.runtime[cid].update(video_mode='normal', video_gen=0, video_duration=0.)
+
+        def switch_video(self, cid, mode):
+            """R16: 영상을 'normal' 또는 'scenario'로 바꾼다. 실영상 시나리오 카메라가 아니면 None,
+            이미 그 영상이면 False(진행 중에 다시 시작해도 처음부터 다시 틀지 않는다), 바꾸면 True."""
+            if cid not in self.video_plan or mode not in ('normal', 'scenario'):
+                return None
+            with self.lock:
+                r = self.runtime[cid]
+                if r['video_mode'] == mode:
+                    return False
+                r['video_mode'] = mode
+                r['video_gen'] += 1
+            return True
+
+        def capture(self, cid):
+            """R16: 실영상 시나리오 카메라는 평소 영상을 반복하다가, 전환 요청이 오면 그 영상으로 바꿔 연다.
+            시나리오 영상은 한 번 끝까지 틀면 평소 영상으로 돌아간다. 다른 카메라는 엔진 재생을 그대로 쓴다."""
+            plan = self.video_plan.get(cid)
+            if not plan:
+                return super().capture(cid)
+            r = self.runtime[cid]
+            reason = None
+            while not self.stop.is_set():
+                with self.lock:
+                    if reason:
+                        # 영상이 바뀌면 이전 영상의 추적과 진행 중 사건을 여기서 끊는다. 새 영상 사건으로 이어지지 않는다.
+                        self.reset(r, reason)
+                        static = getattr(self.model, 'static', None)
+                        if static is not None:
+                            static[cid] = StaticFilter()
+                            self.model.ignored.pop(cid, None)
+                    mode, gen = r['video_mode'], r['video_gen']
+                status = self.play_video(cid, r, plan[mode], gen, loop=mode == 'normal')
+                if status in ('error', 'stop'):
+                    return
+                if status == 'done':
+                    with self.lock:
+                        if r['video_gen'] == gen:
+                            r['video_mode'] = 'normal'
+                            r['video_gen'] += 1
+                    reason = 'scenario_done'
+                else:
+                    reason = 'video_switch'
+
+        def play_video(self, cid, r, path, gen, loop):
+            """엔진 capture()와 같은 방식으로 한 영상을 실시간처럼 읽는다.
+            'switch'(전환 요청), 'done'(반복하지 않는 영상이 끝남), 'stop', 'error' 중 하나를 돌려준다."""
+            import cv2
+            import math
+            cap = cv2.VideoCapture(str(path))
+            if not cap.isOpened():
+                r['error'] = '영상 파일을 열 수 없습니다.'
+                cap.release()
+                return 'error'
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            fps = fps if math.isfinite(fps) and 1 <= fps <= 240 else 25
+            frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+            with self.lock:
+                r['video_duration'] = frames / fps if math.isfinite(frames) and frames > 0 else 0.
+            start, index = time.monotonic(), 0
+            try:
+                while not self.stop.is_set():
+                    if r['video_gen'] != gen:
+                        return 'switch'
+                    target = int((time.monotonic() - start) * fps)
+                    if index > target:
+                        self.stop.wait(.02)
+                        continue
+                    if target - index > fps * 2:
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, target)
+                        index = target
+                    while index < target:
+                        if not cap.grab():
+                            break
+                        index += 1
+                    ok, frame = cap.read()
+                    index += 1
+                    if not ok:
+                        if index <= 1:
+                            r['error'] = '영상 디코딩 실패'
+                            return 'error'
+                        if not loop:
+                            return 'done'
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        start, index = time.monotonic(), 0
+                        with self.lock:
+                            self.reset(r, 'video_loop')
+                        self.stop.wait(.03)
+                        continue
+                    h, w = frame.shape[:2]
+                    with self.lock:
+                        r['native_size'] = (w, h)
+                        if r['cfg'] is None:     # 엔진과 같다: 저장된 구역이 없으면 zoo_vision의 안전구역을 쓴다
+                            old = r['cam']['safe_zone']
+                            polygon = [[float(x) / (w - 1), float(y) / (h - 1)] for x, y in old] if old is not None else []
+                            valid = bool(polygon) and all(0 <= v <= 1 for q in polygon for v in q)
+                            r['cfg'] = dict(polygon=polygon if valid else [], enabled=valid and bool(r['cam']['alert_on_exit']),
+                                            person_inside=False, reviewed=False, version=0)
+                    if w > self.args.width:
+                        frame = cv2.resize(frame, (self.args.width, round(h * self.args.width / w)))
+                    with self.lock:
+                        r.update(frame=frame, stamp=time.monotonic(), observed_at=zj.now().isoformat(),
+                                 video_sec=cap.get(cv2.CAP_PROP_POS_MSEC) / 1000, seq=r['seq'] + 1)
+                    self.stop.wait(1 / 15)
+                return 'stop'
+            except Exception as exc:
+                r['error'] = '영상 오류: ' + type(exc).__name__
+                return 'error'
+            finally:
+                cap.release()
 
         def gate_for(self, cid, name):
             return camera_gate(cid, name, super().gate_for(cid, name))

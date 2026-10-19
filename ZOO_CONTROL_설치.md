@@ -6,10 +6,12 @@
 
 | 위치 | 내용 |
 | --- | --- |
-| `twin_control/` | 관제 서버와 화면 (v15) |
+| `twin_control/` | 관제 서버와 화면 (v18) |
 | `zoo_safe/` | 분석 엔진 |
 | `zoo_vision.py`, `zoo_safety.py`, `safezoo.css` | 엔진이 읽는 원본 카메라 설정과 구역 판정 코드 |
-| `elephant_cctv.mp4`, `giraffe_cctv.mp4`, `tiger_cctv.mp4`, `redpanda_cctv.mp4` | 카메라 4대 영상 |
+| `elephant_cctv.mp4`, `giraffe_cctv.mp4`, `tiger_cctv.mp4`, `redpanda_cctv.mp4` | 카메라 4대 영상 (기린·레서판다는 실영상 시나리오의 위험 영상) |
+| `giraffe_safe_cctv.mp4`, `redpanda_safe_cctv.mp4` | 기린·레서판다 평소 영상 (v17부터 평소에는 이 영상을 반복) |
+| `twin_control/scenario_video.json` | 카메라별 평소 영상과 위험 영상 짝 |
 | `yolo26n.pt` | YOLO 탐지 모델 |
 | `twin_control/roi_seed.json` | 카메라 4대의 안전구역. 처음 켤 때 자동으로 채워진다 |
 | `twin_control/map/` | 3D 지도 설정과 안내도 이미지 |
@@ -46,6 +48,7 @@
 - 서버는 `twin_control` 바로 위 폴더에 `zoo_vision.py`와 `giraffe_cctv.mp4`가 있으면 그 폴더의 영상·원본 코드·`yolo26n.pt`를 쓴다.
 - 사건 DB에 구역이 없는 카메라는 `roi_seed.json`의 구역으로 채운다. 관제 화면에서 구역을 고치면 그 PC의 DB에 저장되고, 그 뒤로는 고친 구역을 쓴다.
 - 실행 파일(.bat)은 받은 폴더의 `.venv` 파이썬을 먼저 찾는다.
+- 기린·레서판다 카메라는 평소 영상을 돌리다가, 재생기에서 "기린 이탈 (실영상)"·"레서판다 사람 침입 (실영상)"을 시작할 때만 위험 영상으로 바뀐다 (`twin_control/docs/scenario_video_rule.md`).
 
 ## 다르게 나올 수 있는 것
 
