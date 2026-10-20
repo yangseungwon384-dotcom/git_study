@@ -740,7 +740,7 @@ function log(x){ S.journal.push({t:S.t,x}); }
 function addEvent(e, silent){
   e.id = 'E'+(++S.evSeq); e.status = e.status||'new'; e.t = e.t==null?S.t:e.t;
   S.events.push(e);
-  if(!silent){ log(LV[e.level][0]+' '+e.title); if($('#popup').checked){ select('event',e.id); } }
+  if(!silent){ log(LV[e.level][0]+' '+e.title); if($('#popup').checked){ select('event',e.id,true); } }
   return e;
 }
 const A = id => S.animals.find(a=>a.id===id);
@@ -749,13 +749,14 @@ const camOfZone = z => { const c=CAMS.find(c=>c.zone===z); return c&&c.id; };
 const camOfAnimal = a => { const live=Object.keys(LIVE_ANIMAL).find(k=>LIVE_ANIMAL[k]===a.id), c=live&&CAMS.find(c=>c.live===live); return c?c.id:camOfZone(a.zone); };
 
 /* ---------- selection shared by all panels ---------- */
-/* R21: 첫 화면 카메라 칸 하나가 크게(한 줄 전체) 보이는 상태. 선택이 바뀌면 그 카메라가 커지고,
-   "4분할 보기"를 누르거나 다른 탭에서 통합 관제로 돌아오면 4분할로 되돌린다. */
+/* R21: 첫 화면 카메라 칸 하나가 크게(한 줄 전체) 보이는 상태. 사람이 직접 고르면 그 카메라가 커지고,
+   "4분할 보기"를 누르거나 다른 탭에서 통합 관제로 돌아오면 4분할로 되돌린다.
+   R22: 시나리오·자동 전환처럼 화면이 스스로 고른 선택(auto)은 카메라를 키우지 않고 4분할을 유지한다. */
 const HERO = {big:false};
-function select(type,id){
+function select(type,id,auto){
   S.sel = {type,id};
   const r = related();
-  HERO.big = !!r.cam;
+  HERO.big = !auto && !!r.cam;
   if(r.cam && !S.grid.includes(r.cam)) S.grid[3] = r.cam;
   renderAll();
 }
@@ -1783,7 +1784,7 @@ function showReport(){
 function auto(delay,fn){ S.autoQ.push({at:S.t+delay,fn}); }
 const SCN = {
   ele:[
-    [2,()=>{ S.step='1/8 평상시. 코끼리 체온이 주의 범위입니다.'; select('animal','ele'); }],
+    [2,()=>{ S.step='1/8 평상시. 코끼리 체온이 주의 범위입니다.'; select('animal','ele',true); }],
     [8,()=>{ const g=S.gates.forest[1]; g.locked=false; g.unauth=true; g.by='작업 일정 없음 '+hm(S.t);
       const e=addEvent({level:2,title:'초식동물 숲 사육사 통로문 비인가 개방',desc:'작업 일정에 없는 스마트락 개방',zone:'forest',cam:'CAM-01',animal:'ele',evd:['스마트락 G-F2 개방']}); S._lockEv=e;
       S.step='2/8 스마트락 G-F2 비인가 개방 감지 (Level 2).'; }],
