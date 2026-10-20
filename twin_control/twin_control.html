@@ -80,7 +80,32 @@ body.em .grid{grid-template-columns:260px minmax(0,1fr) 350px}
 #bigAlert[hidden]{display:none}
 .ba-head{display:flex;align-items:center;gap:12px;color:var(--fg);font-size:15px}
 .ba-head .sp{flex:1}
-.ba-grid{flex:1;display:grid;gap:10px;min-height:0}
+.ba-body{flex:1;display:grid;grid-template-columns:minmax(0,1fr);gap:10px;min-height:0}
+.ba-body.split{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}   /* R20: 영상 | 2D 지도 5:5 */
+.ba-grid{display:grid;gap:10px;min-height:0}
+.ba-map{display:flex;flex-direction:column;min-height:0;border:3px solid var(--crit);border-radius:10px;overflow:hidden;background:#0b1510}
+.ba-map[hidden]{display:none}
+.ba-map.intrusion{border-color:var(--warn)}
+.ba-map.mock,.ba-pane.mock{border-style:dashed}
+.ba-maphead{padding:10px 14px;font-weight:800;font-size:clamp(14px,1.6vw,22px);color:var(--fg);background:#101a2b;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.ba-maphead .sub{font-size:clamp(12px,1.1vw,15px);font-weight:600;color:var(--muted)}
+.ba-mapbox{flex:1;min-height:0;display:flex;align-items:center;justify-content:center}
+.ba-mapbox svg{width:100%;height:100%;max-height:100%}
+.ba-body.maponly{grid-template-columns:minmax(0,1fr)}   /* R21: 코끼리 모의 경보는 영상 없이 지도만 */
+.ba-body.maponly .ba-grid{display:none}
+.ba-maphead .act{margin-left:auto;display:flex;gap:8px;align-items:center}
+.ba-maphead .act[hidden]{display:none}
+.ba-maphead .mockchip{font-size:13px;font-weight:700;border:2px dashed var(--crit);color:var(--crit);border-radius:999px;padding:0 8px}
+.ba-maphead .btn{white-space:nowrap}
+.rpt-save{font-size:13px;padding:6px 10px;border-radius:6px;background:var(--panel-2);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.rpt-save.ok{color:var(--ok)} .rpt-save.bad{color:var(--crit)}
+.rpt-list{display:flex;flex-direction:column}
+.rpt-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:8px 2px;border-bottom:1px solid var(--line);font-size:13px}
+.rpt-row:last-child{border-bottom:0}
+.rpt-row .when{font-variant-numeric:tabular-nums;color:var(--muted)}
+.ba-novideo{color:var(--muted);font-size:14px;text-align:center;padding:16px}
+.ba-pane.mock .ba-banner{background:repeating-linear-gradient(135deg,var(--crit) 0 14px,#d94a4a 14px 28px)}
+.ba-banner .mockchip{font-size:13px;font-weight:700;border:2px dashed #fff;border-radius:999px;padding:0 8px}
 .ba-grid.n1{grid-template-columns:1fr}
 .ba-grid.n2{grid-template-columns:1fr 1fr}
 .ba-grid.n4{grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr}
@@ -343,6 +368,11 @@ a.btn[aria-disabled="true"]{opacity:.45;pointer-events:none}
           </table>
         </div>
       </section>
+      <section class="panel mockp" id="rptPanel" aria-label="모의 리포트">
+        <h2>모의 리포트 <span class="chip-mock">◇ 모의 · 사건 기록과 별도</span><small>코끼리 모의 시나리오가 끝날 때 뜨는 사후 보고서 초안</small>
+          <span style="flex:1"></span><a class="btn sm" id="rptDl" href="/api/scenario-reports.csv">모의 리포트 CSV 내려받기</a></h2>
+        <div class="body"><div class="rpt-list" id="rptList"><span class="sub">불러오는 중…</span></div></div>
+      </section>
     </div>
   </section>
 
@@ -363,6 +393,7 @@ a.btn[aria-disabled="true"]{opacity:.45;pointer-events:none}
 
   <section class="panel hero" id="camHero" aria-label="실시간 카메라">
     <h2>실시간 카메라 <small>실제 영상 분석 · 4대</small><span class="hint">▶ 카메라를 누르면 크게 봅니다</span>
+      <button class="btn sm" id="heroGrid" hidden>4분할 보기</button>
       <label class="toggle" for="popup"><input type="checkbox" id="popup" checked> 이벤트 발생 시 자동 전환</label>
     </h2>
     <div class="body"><div class="cams" id="cams"></div></div>
@@ -484,7 +515,13 @@ a.btn[aria-disabled="true"]{opacity:.45;pointer-events:none}
 
 <div id="bigAlert" hidden role="dialog" aria-modal="true" aria-labelledby="baTitle">
   <div class="ba-head"><b id="baTitle">경보</b><span class="sp"></span><button class="btn" id="baClose">닫기 (경보는 계속 진행)</button></div>
-  <div class="ba-grid" id="baGrid"></div>
+  <div class="ba-body" id="baBody">
+    <div class="ba-grid" id="baGrid"></div>
+    <section class="ba-map" id="baMap" hidden aria-label="GIS 관제 지도 (2D)">
+      <div class="ba-maphead"><span id="baMapTitle">GIS 관제 지도</span> <span class="sub" id="baMapSub"></span><span class="act" id="baMapAct" hidden></span></div>
+      <div class="ba-mapbox" id="baMapBox"></div>
+    </section>
+  </div>
   <div class="ba-more" id="baMore"></div>
 </div>
 <div class="ov" id="ov" hidden><div class="dlg" role="dialog" aria-modal="true" id="dlg"></div></div>
@@ -541,41 +578,83 @@ function post(path, body){
 /* R13: 경보 큰 화면. 서버의 alerts(진행 중·미확인·오탐 아닌 기린 이탈과 사람 침입, 카메라별로 묶음)를 크게 띄운다.
    새 경보가 생기면 자동으로 열린다. 닫으면 그 경보는 60초 동안 다시 자동으로 열지 않는다(새 사건이 붙어도).
    경보가 모두 확인·종료되면 저절로 닫힌다. 모의 재생기 사건은 띄우지 않는다. */
-const BIG = {open:false, shown:'', dismissed:{}, seen:new Set(), COOLDOWN_MS:60000, MAX:4};
+const BIG = {open:false, shown:'', dismissed:{}, seen:new Set(), mockOff:new Set(), COOLDOWN_MS:60000, MAX:4};
 const bigKey = a => a.camera+'|'+a.kind;
 const KIND_KO = {exit:'구역 이탈 관측', intrusion:'사람 구역 침입'};
+const MOCK_CAM = 'ZOO_CAM_ELEPHANT_01';   // R20: 코끼리 모의 경보가 걸리는 카메라 (CAM-01, 영상은 실시간)
+/* R20: 큰 화면 칸 = 실제 경보(서버 alerts) + 코끼리 모의 Level 3 경보(브라우저 안 사건).
+   칸은 알람·비상 상황이 시작된 순간에 생긴다. 시나리오를 시작했다는 것만으로는 열지 않는다. */
+function mockElephant(){
+  if(!S||!S.events) return null;
+  const e=S.events.find(x=>x.level===3&&x.animal==='ele'&&!x.live&&x.status!=='closed'&&x.status!=='false'&&!BIG.mockOff.has(x.id));
+  if(!e) return null;
+  return {camera:MOCK_CAM, kind:'exit', mock:true, id:e.id, count:1, object_ko:'코끼리', title:e.title, since:fmt(e.t), zone:'forest', event_ids:['mock:'+e.id]};
+}
+function bigPanes(){
+  const out=((LIVE.on&&LIVE.alerts)||[]).slice(), m=mockElephant();
+  if(m) out.push(m);
+  return out;
+}
+const paneKey = p => p.mock ? 'mock|'+p.id : bigKey(p);
 function renderBig(){
-  const alerts=(LIVE.on&&LIVE.alerts)||[], now=Date.now();
+  const panes=bigPanes(), now=Date.now();
   let fresh=false;
-  alerts.forEach(a=>a.event_ids.forEach(id=>{ if(!BIG.seen.has(id)){ BIG.seen.add(id); const d=BIG.dismissed[bigKey(a)]; if(!d||now-d>BIG.COOLDOWN_MS) fresh=true; } }));
-  if(!alerts.length){ if(BIG.open) setBig(false); $('#baOpen').hidden=true; return; }
-  $('#baOpen').hidden=BIG.open; $('#baOpen').textContent='경보 큰 화면 ('+alerts.length+')';
+  panes.forEach(a=>a.event_ids.forEach(id=>{ if(!BIG.seen.has(id)){ BIG.seen.add(id); const d=BIG.dismissed[paneKey(a)]; if(!d||now-d>BIG.COOLDOWN_MS) fresh=true; } }));
+  if(!panes.length){ if(BIG.open) setBig(false); $('#baOpen').hidden=true; return; }
+  $('#baOpen').hidden=BIG.open; $('#baOpen').textContent='경보 큰 화면 ('+panes.length+')';
   if(fresh && !BIG.open) setBig(true);
   if(!BIG.open) return;
-  const show=alerts.slice(0,BIG.MAX), rest=alerts.slice(BIG.MAX);
-  $('#baTitle').textContent='경보 '+alerts.length+'건 · 실제 영상 분석';
-  const key=show.map(bigKey).join(',');
+  const show=panes.slice(0,BIG.MAX), rest=panes.slice(BIG.MAX), nMock=panes.filter(p=>p.mock).length;
+  $('#baTitle').textContent='경보 '+panes.length+'건'+(nMock?' (모의 '+nMock+'건 포함)':'')+' · '+(nMock===panes.length?'모의 시나리오':'실제 영상 분석');
+  const key=show.map(paneKey).join(',');
   if(BIG.shown!==key){   // 칸 구성이 바뀔 때만 다시 그린다 (영상 연결을 끊었다 잇지 않게)
     BIG.shown=key; const g=$('#baGrid'); stopStreams(g);
     g.className='ba-grid '+(show.length===1?'n1':show.length===2?'n2':'n4');
-    g.innerHTML=show.map(a=>{ const c=CAMS.find(x=>x.live===a.camera);
-      return '<section class="ba-pane '+a.kind+'" data-bk="'+esc(bigKey(a))+'"><div class="ba-banner"><span>▲ '+esc((c?c.name:a.camera))+' · '+KIND_KO[a.kind]+'</span>'+
+    g.innerHTML=show.map(a=>{ const c=CAMS.find(x=>x.live===a.camera), k=paneKey(a);
+      return '<section class="ba-pane '+a.kind+(a.mock?' mock':'')+'" data-bk="'+esc(k)+'"><div class="ba-banner"><span>▲ '+esc((c?c.name:a.camera))+' · '+(a.mock?'이탈 징후 (Level 3)':KIND_KO[a.kind])+'</span>'+
+        (a.mock?'<span class="mockchip">모의</span>':'')+
         '<span class="sub" data-bsub></span><span class="sp"></span>'+
-        '<button class="btn sm" data-back="'+esc(bigKey(a))+'">확인</button></div>'+
-        '<div class="ba-video"><img src="/stream/'+a.camera+'.mjpg" alt="'+esc(a.camera)+' 실영상"></div></section>'; }).join('');
+        (a.mock ? '<button class="btn sm" data-bmock="'+esc(a.id)+'">확인 (모의)</button>' : '<button class="btn sm" data-back="'+esc(k)+'">확인</button>')+'</div>'+
+        (a.mock ? '<div class="ba-video"><div class="ba-novideo">모의 경보라 영상은 띄우지 않습니다. 지도에서 확인하세요.</div></div></section>'
+                : '<div class="ba-video"><img src="/stream/'+a.camera+'.mjpg" alt="'+esc(a.camera)+' 실영상"></div></section>'); }).join('');
   }
-  show.forEach(a=>{ const el=document.querySelector('[data-bk="'+bigKey(a)+'"] [data-bsub]'), c=CAMS.find(x=>x.live===a.camera), tm=/(\d\d:\d\d:\d\d)/.exec(a.since||'');
+  show.forEach(a=>{ const el=document.querySelector('[data-bk="'+paneKey(a)+'"] [data-bsub]'), c=CAMS.find(x=>x.live===a.camera), tm=/(\d\d:\d\d(:\d\d)?)/.exec(a.since||'');
+    if(!el) return;
+    if(a.mock){ el.textContent=(c?c.id:'')+' · '+a.title+(tm?' · '+tm[1]+'부터':''); return; }
     const v=videoOf(a.camera);
-    if(el) el.textContent=(c?c.id:'')+' · '+(a.kind==='exit'?a.object_ko:'사람')+' '+a.count+'건'+(tm?' · '+tm[1]+'부터':'')+(v?(v.mode==='scenario'?' · ▶ 시나리오 영상':' · 평소 영상'):''); });
-  setHTML($('#baMore'), rest.length ? '그 밖의 경보 '+rest.length+'건: '+rest.map(a=>{ const c=CAMS.find(x=>x.live===a.camera); return esc((c?c.id:a.camera)+' '+KIND_KO[a.kind]); }).join(', ') : '');
+    el.textContent=(c?c.id:'')+' · '+(a.kind==='exit'?a.object_ko:'사람')+' '+a.count+'건'+(tm?' · '+tm[1]+'부터':'')+(v?(v.mode==='scenario'?' · ▶ 시나리오 영상':' · 평소 영상'):''); });
+  placeBigMap(show.length===1 ? show[0] : null, show.length===1 && show[0].mock);
+  setHTML($('#baMore'), rest.length ? '그 밖의 경보 '+rest.length+'건: '+rest.map(a=>{ const c=CAMS.find(x=>x.live===a.camera); return esc((c?c.id:a.camera)+' '+(a.mock?'이탈 징후 (모의)':KIND_KO[a.kind])); }).join(', ') : '');
+}
+/* R20 I2: 경보가 하나면 오른쪽에 2D 지도. 지도 SVG를 복제하지 않고 옮겨 와서 같은 그리기 함수가 계속 갱신한다.
+   큰 화면을 닫거나 칸이 2개 이상이 되면 원래 자리(통합 관제 지도)로 돌려놓는다. */
+function placeBigMap(p, mapOnly){
+  const map=$('#map'), box=$('#baMapBox'), home=$('#map2dWrap'), sec=$('#baMap'), act=$('#baMapAct');
+  $('#baBody').classList.toggle('maponly', !!(p&&mapOnly));
+  /* R21 I4: 지도만 띄울 때는 지도 제목 줄이 경보 띠 역할을 한다 (제목, 모의 표시, 확인 버튼) */
+  $('#baMapTitle').textContent = p&&mapOnly ? '▲ '+(Z(p.zone||'forest')?Z(p.zone||'forest').name:'')+' · 이탈 징후 (Level 3)' : 'GIS 관제 지도';
+  const want = p&&mapOnly ? 'mock|'+p.id : '';
+  if(act.dataset.k!==want){ act.dataset.k=want; act.innerHTML = want ? '<span class="mockchip">◇ 모의</span><button class="btn sm" data-bmock="'+esc(p.id)+'">확인 (모의)</button>' : ''; }
+  act.hidden = !want;
+  if(p){
+    if(map.parentNode!==box){ closeMapPop(); box.appendChild(map); }
+    sec.hidden=false; sec.className='ba-map '+p.kind+(p.mock?' mock':''); $('#baBody').classList.toggle('split', !mapOnly);
+    const c=CAMS.find(x=>x.live===p.camera), zid=p.zone||(c&&c.zone), z=zid&&Z(zid);
+    $('#baMapSub').textContent=(c?c.id+' '+c.name:'')+(z?' · '+z.name+' 구역':'')+' · '+
+      (p.mock?'점선·빨강 ! = 코끼리 이탈 징후 (모의, 영상 없음)':p.kind==='exit'?'빨강 ! = 이탈':'주황 ! = 사람 침입');
+    renderMap();
+  } else {
+    if(map.parentNode!==home) home.insertBefore(map, home.firstChild);
+    sec.hidden=true; $('#baBody').classList.remove('split'); $('#baBody').classList.remove('maponly');
+  }
 }
 function setBig(open){
   BIG.open=open; $('#bigAlert').hidden=!open;
-  if(!open){ stopStreams($('#baGrid')); $('#baGrid').innerHTML=''; BIG.shown=''; }
+  if(!open){ stopStreams($('#baGrid')); $('#baGrid').innerHTML=''; BIG.shown=''; placeBigMap(null); }
   renderCams(); renderCamView();   // 작은 영상 칸의 스트림을 쉬게 하거나 다시 연다
-  if(open) renderBig(); else { const n=((LIVE.on&&LIVE.alerts)||[]).length; $('#baOpen').hidden=!n; }
+  if(open) renderBig(); else { $('#baOpen').hidden=!bigPanes().length; }
 }
-function closeBig(){ const now=Date.now(); ((LIVE.on&&LIVE.alerts)||[]).forEach(a=>{ BIG.dismissed[bigKey(a)]=now; }); setBig(false); }
+function closeBig(){ const now=Date.now(); bigPanes().forEach(a=>{ BIG.dismissed[paneKey(a)]=now; }); setBig(false); }
 function liveAction(kind, e){
   const base='/api/events/'+e.raw.id, who={name:'관제요원'};
   let job;
@@ -672,7 +751,7 @@ function log(x){ S.journal.push({t:S.t,x}); }
 function addEvent(e, silent){
   e.id = 'E'+(++S.evSeq); e.status = e.status||'new'; e.t = e.t==null?S.t:e.t;
   S.events.push(e);
-  if(!silent){ log(LV[e.level][0]+' '+e.title); if($('#popup').checked){ select('event',e.id); } }
+  if(!silent){ log(LV[e.level][0]+' '+e.title); if($('#popup').checked){ select('event',e.id,true); } }
   return e;
 }
 const A = id => S.animals.find(a=>a.id===id);
@@ -681,9 +760,14 @@ const camOfZone = z => { const c=CAMS.find(c=>c.zone===z); return c&&c.id; };
 const camOfAnimal = a => { const live=Object.keys(LIVE_ANIMAL).find(k=>LIVE_ANIMAL[k]===a.id), c=live&&CAMS.find(c=>c.live===live); return c?c.id:camOfZone(a.zone); };
 
 /* ---------- selection shared by all panels ---------- */
-function select(type,id){
+/* R21: 첫 화면 카메라 칸 하나가 크게(한 줄 전체) 보이는 상태. 사람이 직접 고르면 그 카메라가 커지고,
+   "4분할 보기"를 누르거나 다른 탭에서 통합 관제로 돌아오면 4분할로 되돌린다.
+   R22: 시나리오·자동 전환처럼 화면이 스스로 고른 선택(auto)은 카메라를 키우지 않고 4분할을 유지한다. */
+const HERO = {big:false};
+function select(type,id,auto){
   S.sel = {type,id};
   const r = related();
+  HERO.big = !auto && !!r.cam;
   if(r.cam && !S.grid.includes(r.cam)) S.grid[3] = r.cam;
   renderAll();
 }
@@ -923,6 +1007,7 @@ function mapPopFor(type, id){
 }
 function openMapPop(ev, type, id){
   const pop=$('#mapPop'), list=mapPopFor(type, id);
+  if(BIG.open){ pop.hidden=true; return; }   /* R20: 지도가 큰 화면에 가 있을 때는 팝오버를 띄우지 않는다 */
   if(!list.length||!LIVE.on){ pop.hidden=true; return; }
   const wrap=$('#map2dWrap').getBoundingClientRect();
   pop.innerHTML='<div class="mp-h">실영상 시나리오 <span class="mp-sub">서버 영상 전환 · 모든 화면 · 사건 기록됨</span></div>'+list.map(({c,s})=>{
@@ -1263,7 +1348,9 @@ function renderCams(){
   if(VIEW!=='dash') return setHTML($('#cams'),'');
   const r=related();
   /* R14: 첫 화면 맨 위 카메라. 누르면 카메라 탭에서 그 카메라 한 화면으로 간다. */
-  setHTML($('#cams'), S.grid.map(cid=>camTile(cid, r.cam===cid, 'data-hero').replace('</button>','<span class="go">크게 보기 ›</span></button>')).join(''));
+  const big = HERO.big && S.grid.includes(r.cam);
+  setHTML($('#cams'), S.grid.map(cid=>camTile(cid, big && r.cam===cid, 'data-hero').replace('</button>','<span class="go">크게 보기 ›</span></button>')).join(''));
+  $('#heroGrid').hidden = !big;
 }
 
 /* ---------- camera-only view ---------- */
@@ -1372,6 +1459,7 @@ function edAction(kind){
 const today = () => { const d=new Date(); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); };
 const CSVV = {day:today(), rows:[], state:'idle', tick:0};
 function loadCsv(){
+  loadReports();
   if(!LIVE.on){ CSVV.state='offline'; return renderCsv(); }
   const day=CSVV.day;
   fetch('/api/events?day='+encodeURIComponent(day)).then(r=>r.json().then(d=>({ok:r.ok,d}))).then(res=>{
@@ -1527,7 +1615,9 @@ function renderAi(){
     : '<div class="panel" style="padding:14px;color:var(--muted)">'+(AIV.state==='ok'?(all.length?'필터 조건에 맞는 기록이 없습니다.':'이 날짜에 AI에 보낸 요청이 없습니다. 서버를 --ollama 로 켜거나 CSV 기록 탭에서 "AI 판단 요청"을 누르면 기록이 생깁니다.'):'표시할 기록이 없습니다.')+'</div>');
 }
 function setView(v){
+  const before = VIEW;
   VIEW = ['cam','csv','ai'].includes(v) ? v : 'dash';
+  if(VIEW==='dash' && before!=='dash') HERO.big = false;   /* R21 I1: 다른 탭에서 돌아오면 4분할 */
   try{ history.replaceState(null,'',VIEW==='cam'?'#cameras':VIEW==='csv'?'#csv':VIEW==='ai'?'#ai':'#'); }catch(err){}
   renderAll();
   if(VIEW==='csv'){ $('#csvDay').value=CSVV.day; loadCsv(); }
@@ -1697,16 +1787,52 @@ function renderRadio(){
 /* ---------- dialogs ---------- */
 function dialog(html){ $('#dlg').innerHTML=html; $('#ov').hidden=false; const b=$('#dlg button'); if(b) b.focus(); }
 function closeDialog(){ $('#ov').hidden=true; }
+/* R23: 사후 보고서를 서버의 scenario_reports.csv에 한 번만 저장한다 (실행 ID로 중복 방지). 사건 DB·AI 요청에는 넣지 않는다.
+   저장에 실패해도 보고서 창은 그대로 보이고, 창 안에서 다시 시도할 수 있다. */
+const REPORT = {last:null, list:[]};
+const newRunId = () => 'run-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);
 function showReport(){
+  REPORT.last = {run_id:S.runId||newRunId(), scenario:S.runId?'코끼리 이탈 징후 (모의)':'수동 비상 발령', title:'사후 보고서 초안',
+                 entries:S.journal.map(j=>({t:fmt(j.t), x:j.x}))};
+  S.runId = null;   // 다음 비상은 새 보고서
   dialog('<h3>사후 보고서 초안</h3><div style="color:var(--muted)">모의 시나리오 기록을 시간순으로 묶었습니다. 영상 클립과 통신 녹음 첨부는 4단계 범위입니다.</div><ol class="num">'+
-    S.journal.map(j=>'<li>'+fmt(j.t)+'  '+j.x+'</li>').join('')+'</ol><div class="btns"><button class="btn primary" data-dlg="close">닫기</button></div>');
+    S.journal.map(j=>'<li>'+fmt(j.t)+'  '+j.x+'</li>').join('')+'</ol><div class="rpt-save" id="rptSave" role="status">CSV 기록 탭에 저장 중…</div><div class="btns"><button class="btn primary" data-dlg="close">닫기</button></div>');
+  saveReport();
+}
+function saveReport(){
+  const r=REPORT.last, el=()=>$('#rptSave');
+  if(!r) return;
+  if(!LIVE.on){ if(el()){ el().className='rpt-save bad'; el().textContent='분석 서버에 연결되지 않아 저장하지 못했습니다.'; } return; }
+  post('/api/scenario-reports', r).then(res=>{
+    if(!el()) return;
+    el().className='rpt-save ok';
+    el().textContent = res.duplicate ? '✓ 이미 저장된 보고서입니다 (CSV 기록 탭 › 모의 리포트).' : '✓ 저장됨: CSV 기록 탭 › 모의 리포트 ('+res.lines+'줄, '+res.saved_at+')';
+  }).catch(err=>{
+    if(!el()) return;
+    el().className='rpt-save bad';
+    el().innerHTML='저장 실패 ('+esc(err.message)+'). <button class="btn sm" data-rptretry>다시 시도</button>';
+  });
+}
+function loadReports(){
+  if(!LIVE.on) return setHTML($('#rptList'),'<span class="sub">분석 서버에 연결되면 보입니다.</span>');
+  fetch('/api/scenario-reports',{cache:'no-store'}).then(r=>r.ok?r.json():Promise.reject(new Error('HTTP '+r.status))).then(d=>{
+    REPORT.list=d.reports||[];
+    setHTML($('#rptList'), REPORT.list.length ? REPORT.list.map(r=>'<div class="rpt-row"><span class="when">'+esc(r.saved_at)+'</span><span>'+esc(r.title)+' · '+esc(r.scenario)+'</span>'+
+      '<span class="sub">'+r.entries.length+'줄</span><button class="btn sm" data-rptview="'+esc(r.run_id)+'">보기</button></div>').join('')
+      : '<span class="sub">아직 저장된 모의 리포트가 없습니다. 코끼리 모의 시나리오를 끝까지 돌리면 비상 해제 때 저장됩니다.</span>');
+  }).catch(err=>setHTML($('#rptList'),'<span class="sub">모의 리포트를 불러오지 못했습니다 ('+esc(err.message)+'). 새로고침을 눌러 주세요.</span>'));
+}
+function viewReport(id){
+  const r=REPORT.list.find(x=>x.run_id===id); if(!r) return;
+  dialog('<h3>'+esc(r.title)+' <span class="chip-mock">◇ 모의 · 저장본</span></h3><div style="color:var(--muted)">'+esc(r.scenario)+' · 저장 '+esc(r.saved_at)+'</div><ol class="num">'+
+    r.entries.map(e=>'<li>'+esc(e.t)+'  '+esc(e.x)+'</li>').join('')+'</ol><div class="btns"><button class="btn primary" data-dlg="close">닫기</button></div>');
 }
 
 /* ---------- scenario player ---------- */
 function auto(delay,fn){ S.autoQ.push({at:S.t+delay,fn}); }
 const SCN = {
   ele:[
-    [2,()=>{ S.step='1/8 평상시. 코끼리 체온이 주의 범위입니다.'; select('animal','ele'); }],
+    [2,()=>{ S.step='1/8 평상시. 코끼리 체온이 주의 범위입니다.'; select('animal','ele',true); }],
     [8,()=>{ const g=S.gates.forest[1]; g.locked=false; g.unauth=true; g.by='작업 일정 없음 '+hm(S.t);
       const e=addEvent({level:2,title:'초식동물 숲 사육사 통로문 비인가 개방',desc:'작업 일정에 없는 스마트락 개방',zone:'forest',cam:'CAM-01',animal:'ele',evd:['스마트락 G-F2 개방']}); S._lockEv=e;
       S.step='2/8 스마트락 G-F2 비인가 개방 감지 (Level 2).'; }],
@@ -1720,7 +1846,7 @@ const SCN = {
 function startScenario(){
   const v=$('#scnSel').value;
   if(v.startsWith('live:')) return startLiveScenario(v.slice(5));
-  init(); S.scn={id:$('#scnSel').value,start:S.t,cur:0}; S.speed=+$('#scnSpeed').value; S.step='시나리오 시작.'; renderAll();
+  init(); S.scn={id:$('#scnSel').value,start:S.t,cur:0}; S.runId=newRunId(); S.speed=+$('#scnSpeed').value; S.step='시나리오 시작.'; renderAll();
 }
 
 /* ---------- simulation tick ---------- */
@@ -1748,6 +1874,8 @@ function renderAll(){ renderTop(); renderLayers(); renderAnimals(); liveVitals()
 document.addEventListener('click',ev=>{
   const t=ev.target, c=s=>t.closest(s);
   let el;
+  if(c('[data-rptretry]')) return saveReport();
+  if((el=c('[data-rptview]'))) return viewReport(el.dataset.rptview);
   if((el=c('[data-mapscn]'))){ closeMapPop(); return startLiveScenario(el.dataset.mapscn); }
   if(c('[data-mappop]')) return closeMapPop();
   if(c('#mapPop')) return;
@@ -1782,11 +1910,15 @@ $('#tl').addEventListener('click',ev=>{ const r=$('#tl').getBoundingClientRect()
 $('#q').addEventListener('input',renderAnimals); $('#riskF').addEventListener('change',renderAnimals); $('#showDone').addEventListener('change',renderFeed);
 $('#scnPlay').addEventListener('click',startScenario);
 $('#baClose').addEventListener('click',closeBig);
+$('#heroGrid').addEventListener('click',()=>{ HERO.big=false; renderCams(); });   /* R21 I2 */
 $('#cams').addEventListener('click',e=>{ const t=e.target.closest('[data-hero]'); if(!t) return;
   e.stopPropagation(); CV.cam=t.dataset.hero; CV.layout='one'; CV.edit=null; setView('cam'); },true);
 $('#baOpen').addEventListener('click',()=>setBig(true));
 document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&BIG.open) closeBig(); });
-$('#baGrid').addEventListener('click',e=>{ const b=e.target.closest('[data-back]'); if(!b) return;
+$('#baMap').addEventListener('click',e=>{ const m=e.target.closest('[data-bmock]'); if(m){ BIG.mockOff.add(m.dataset.bmock); renderBig(); } });
+$('#baGrid').addEventListener('click',e=>{ const m=e.target.closest('[data-bmock]');
+  if(m){ BIG.mockOff.add(m.dataset.bmock); renderBig(); return; }   /* R20: 모의 경보 확인 = 큰 화면에서 내림 (모의 사건 흐름은 그대로) */
+  const b=e.target.closest('[data-back]'); if(!b) return;
   const a=((LIVE.alerts)||[]).find(x=>bigKey(x)===b.dataset.back); if(!a) return;
   b.disabled=true; b.textContent='확인 중';
   Promise.all(a.event_ids.map(id=>post('/api/events/'+id+'/ack',{name:'관제요원'}))).catch(err=>{ b.disabled=false; b.textContent='확인 실패: '+err.message; }); });

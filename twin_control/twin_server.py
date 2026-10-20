@@ -87,7 +87,16 @@ def load_camera_animals():
 ALERT_EXIT_CAMERAS = ('ZOO_CAM_GIRAFFE_01',)
 
 
-def big_alerts(rows, camera_animal):
+def load_camera_zones():
+    """R20: 카메라 → 지도 구역 (map/naturepark.json의 cameras[].live·zone). 못 읽으면 빈 값."""
+    try:
+        cams = json.loads(MAP_FILE.read_text(encoding='utf-8')).get('cameras') or []
+        return {c['live']: c.get('zone') for c in cams if c.get('live')}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+
+
+def big_alerts(rows, camera_animal, camera_zone=None):
     """큰 화면 경보 목록 (R13, 판정은 읽기만 한다). 진행 중이고, 아직 확인하지 않았고, 오탐이 아닌 실제 분석 사건만.
     같은 카메라·같은 종류는 한 항목으로 묶는다. 순서: 동물 이탈 → 사람 침입, 같은 종류는 먼저 시작한 순."""
     grouped = {}
@@ -102,6 +111,7 @@ def big_alerts(rows, camera_animal):
         else:
             continue
         a = grouped.setdefault((cam, kind), dict(camera=cam, kind=kind, animal=camera_animal.get(cam),
+                                                  zone=(camera_zone or {}).get(cam),   # R20: 지도 구역 (forest·farm·…)
                                                   object_ko=twin_vision.label_of(row.get('object')),
                                                   since=row.get('detected_at'), count=0, event_ids=[]))
         a['count'] += 1
@@ -138,6 +148,11 @@ STATE_SEC = 0.5    # 상태 전송 주기
 EVENT_LIMIT = 60   # 화면에 넘기는 오늘 사건 수 (최근 것부터)
 VIDEO_ENDED_SEC = 30   # R18: 실영상 시나리오가 끝난 뒤 지도에 '끝남'을 보여 주는 시간
 EVENT_ID = re.compile(r'^[0-9a-f]{32}$')
+# R23: 모의 시나리오 사후 보고서 저장 (사건 DB와 분리된 CSV, docs/report_csv_rule.md)
+REPORT_FILE_NAME = 'scenario_reports.csv'
+REPORT_FIELDS = ('run_id', 'saved_at', 'scenario', 'title', 'line', 'sim_time', 'text')
+RUN_ID = re.compile(r'^[A-Za-z0-9-]{8,64}$')
+REPORT_MAX_LINES = 500
 REVIEW_LABELS = ('실제 위험', '오탐', '판단 보류')
 # R2 (2026-10-15): 사람 진입 알림 문장에서 '(진입 확정 아님)'을 뺀다. 이미 저장된 사건도 보여 줄 때 뺀다.
 PERSON_ALERT_MSG = '안전구역 안에서 사람이 관측되었습니다. 담당자 확인이 필요합니다.'
@@ -501,6 +516,7 @@ def create_app(zj, engine, args, accounts):
             stop.wait(max(0.01, FRAME_SEC - spent))
 
     camera_animal = load_camera_animals()
+    camera_zone = load_camera_zones()
 
     def event_view(row, ai=None):
         path = row.get('snapshot_path')
@@ -557,7 +573,7 @@ def create_app(zj, engine, args, accounts):
                     pump_ms=round(sorted(pump_ms)[len(pump_ms) // 2], 1) if pump_ms else None,
                     events=with_ai(rows[-EVENT_LIMIT:]),
                     animals=animal_states(rows, camera_animal),
-                    alerts=big_alerts(rows, camera_animal),
+                    alerts=big_alerts(rows, camera_animal, camera_zone),
                     unacked=engine.db.unacked_count(),
                     ai=dict(live=live_ai, model=ai_args.jev_model, job=dict(job),
                             health=engine.worker.snapshot() if live_ai and hasattr(engine.worker, 'snapshot') else None))
@@ -811,6 +827,68 @@ def create_app(zj, engine, args, accounts):
     def events_of_day(day: str = ''):
         day, rows = day_rows(day)
         return dict(day=day, events=with_ai(rows))
+
+    report_path = engine.db.root / REPORT_FILE_NAME
+    report_lock = threading.Lock()
+
+    def report_cell(value):
+        # 표 계산 프로그램이 수식으로 읽지 않게 한다 (events.csv와 같은 규칙).
+        text = '' if value is None else str(value)
+        return "'" + text if text[:1] in ('=', '+', '-', '@') else text
+
+    def read_reports():
+        """저장된 모의 리포트를 실행(run_id)별로 묶는다. 최근 것부터."""
+        if not report_path.is_file():
+            return []
+        runs = {}
+        with open(report_path, encoding='utf-8-sig', newline='') as handle:
+            for row in csv.DictReader(handle):
+                run = runs.setdefault(row['run_id'], dict(run_id=row['run_id'], saved_at=row['saved_at'], scenario=row['scenario'],
+                                                          title=row['title'], entries=[]))
+                run['entries'].append(dict(t=row['sim_time'], x=row['text'].lstrip("'")))
+        return sorted(runs.values(), key=lambda r: r['saved_at'], reverse=True)
+
+    @app.get('/api/scenario-reports')
+    def scenario_reports():
+        """R23: 모의 시나리오 사후 보고서 목록 (CSV 기록 탭의 '모의 리포트')."""
+        with report_lock:
+            return dict(reports=read_reports()[:50])
+
+    @app.post('/api/scenario-reports')
+    async def save_scenario_report(request: Request):
+        """R23: 사후 보고서 한 건을 scenario_reports.csv에 한 줄씩 덧붙인다. 같은 run_id는 한 번만 저장한다.
+        모의 기록이라 사건 DB·AI 요청·통계에는 넣지 않는다."""
+        if not local_origin(request.headers):
+            raise HTTPException(403, '이 관제 화면에서만 요청할 수 있습니다.')
+        need(request, *ROLES)
+        body = await request.json()
+        run_id = str(body.get('run_id') or '')
+        entries = body.get('entries') or []
+        if not RUN_ID.match(run_id) or not isinstance(entries, list) or not entries or len(entries) > REPORT_MAX_LINES:
+            raise HTTPException(400, '보고서 형식이 올바르지 않습니다.')
+        scenario = str(body.get('scenario') or '')[:40]
+        title = str(body.get('title') or '사후 보고서 초안')[:80]
+        saved_at = time.strftime('%Y-%m-%d %H:%M:%S')
+        with report_lock:
+            if any(r['run_id'] == run_id for r in read_reports()):
+                return dict(saved=False, duplicate=True, run_id=run_id)
+            new = not report_path.is_file()
+            with open(report_path, 'a', encoding='utf-8-sig' if new else 'utf-8', newline='') as handle:
+                writer = csv.writer(handle, lineterminator='\r\n')
+                if new:
+                    writer.writerow(REPORT_FIELDS)
+                for n, e in enumerate(entries, 1):
+                    writer.writerow([run_id, saved_at, report_cell(scenario), report_cell(title), n,
+                                     str((e or {}).get('t') or '')[:12], report_cell(str((e or {}).get('x') or '')[:300])])
+        return dict(saved=True, run_id=run_id, lines=len(entries), saved_at=saved_at)
+
+    @app.get('/api/scenario-reports.csv')
+    def scenario_reports_csv():
+        """R23: 저장된 모의 리포트 파일 그대로 (엑셀용 UTF-8 BOM 포함)."""
+        with report_lock:
+            data = report_path.read_bytes() if report_path.is_file() else ('\ufeff' + ','.join(REPORT_FIELDS) + '\r\n').encode('utf-8')
+        return Response(data, media_type='text/csv; charset=utf-8',
+                        headers={'Content-Disposition': 'attachment; filename="scenario_reports.csv"', 'Cache-Control': 'no-store'})
 
     @app.get('/api/events.csv')
     def events_csv(day: str = ''):
