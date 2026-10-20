@@ -87,7 +87,16 @@ def load_camera_animals():
 ALERT_EXIT_CAMERAS = ('ZOO_CAM_GIRAFFE_01',)
 
 
-def big_alerts(rows, camera_animal):
+def load_camera_zones():
+    """R20: 카메라 → 지도 구역 (map/naturepark.json의 cameras[].live·zone). 못 읽으면 빈 값."""
+    try:
+        cams = json.loads(MAP_FILE.read_text(encoding='utf-8')).get('cameras') or []
+        return {c['live']: c.get('zone') for c in cams if c.get('live')}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+
+
+def big_alerts(rows, camera_animal, camera_zone=None):
     """큰 화면 경보 목록 (R13, 판정은 읽기만 한다). 진행 중이고, 아직 확인하지 않았고, 오탐이 아닌 실제 분석 사건만.
     같은 카메라·같은 종류는 한 항목으로 묶는다. 순서: 동물 이탈 → 사람 침입, 같은 종류는 먼저 시작한 순."""
     grouped = {}
@@ -102,6 +111,7 @@ def big_alerts(rows, camera_animal):
         else:
             continue
         a = grouped.setdefault((cam, kind), dict(camera=cam, kind=kind, animal=camera_animal.get(cam),
+                                                  zone=(camera_zone or {}).get(cam),   # R20: 지도 구역 (forest·farm·…)
                                                   object_ko=twin_vision.label_of(row.get('object')),
                                                   since=row.get('detected_at'), count=0, event_ids=[]))
         a['count'] += 1
@@ -501,6 +511,7 @@ def create_app(zj, engine, args, accounts):
             stop.wait(max(0.01, FRAME_SEC - spent))
 
     camera_animal = load_camera_animals()
+    camera_zone = load_camera_zones()
 
     def event_view(row, ai=None):
         path = row.get('snapshot_path')
@@ -557,7 +568,7 @@ def create_app(zj, engine, args, accounts):
                     pump_ms=round(sorted(pump_ms)[len(pump_ms) // 2], 1) if pump_ms else None,
                     events=with_ai(rows[-EVENT_LIMIT:]),
                     animals=animal_states(rows, camera_animal),
-                    alerts=big_alerts(rows, camera_animal),
+                    alerts=big_alerts(rows, camera_animal, camera_zone),
                     unacked=engine.db.unacked_count(),
                     ai=dict(live=live_ai, model=ai_args.jev_model, job=dict(job),
                             health=engine.worker.snapshot() if live_ai and hasattr(engine.worker, 'snapshot') else None))
