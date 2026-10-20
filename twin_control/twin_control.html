@@ -91,6 +91,13 @@ body.em .grid{grid-template-columns:260px minmax(0,1fr) 350px}
 .ba-maphead .sub{font-size:clamp(12px,1.1vw,15px);font-weight:600;color:var(--muted)}
 .ba-mapbox{flex:1;min-height:0;display:flex;align-items:center;justify-content:center}
 .ba-mapbox svg{width:100%;height:100%;max-height:100%}
+.ba-body.maponly{grid-template-columns:minmax(0,1fr)}   /* R21: 코끼리 모의 경보는 영상 없이 지도만 */
+.ba-body.maponly .ba-grid{display:none}
+.ba-maphead .act{margin-left:auto;display:flex;gap:8px;align-items:center}
+.ba-maphead .act[hidden]{display:none}
+.ba-maphead .mockchip{font-size:13px;font-weight:700;border:2px dashed var(--crit);color:var(--crit);border-radius:999px;padding:0 8px}
+.ba-maphead .btn{white-space:nowrap}
+.ba-novideo{color:var(--muted);font-size:14px;text-align:center;padding:16px}
 .ba-pane.mock .ba-banner{background:repeating-linear-gradient(135deg,var(--crit) 0 14px,#d94a4a 14px 28px)}
 .ba-banner .mockchip{font-size:13px;font-weight:700;border:2px dashed #fff;border-radius:999px;padding:0 8px}
 .ba-grid.n1{grid-template-columns:1fr}
@@ -375,6 +382,7 @@ a.btn[aria-disabled="true"]{opacity:.45;pointer-events:none}
 
   <section class="panel hero" id="camHero" aria-label="실시간 카메라">
     <h2>실시간 카메라 <small>실제 영상 분석 · 4대</small><span class="hint">▶ 카메라를 누르면 크게 봅니다</span>
+      <button class="btn sm" id="heroGrid" hidden>4분할 보기</button>
       <label class="toggle" for="popup"><input type="checkbox" id="popup" checked> 이벤트 발생 시 자동 전환</label>
     </h2>
     <div class="body"><div class="cams" id="cams"></div></div>
@@ -499,7 +507,7 @@ a.btn[aria-disabled="true"]{opacity:.45;pointer-events:none}
   <div class="ba-body" id="baBody">
     <div class="ba-grid" id="baGrid"></div>
     <section class="ba-map" id="baMap" hidden aria-label="GIS 관제 지도 (2D)">
-      <div class="ba-maphead">GIS 관제 지도 <span class="sub" id="baMapSub"></span></div>
+      <div class="ba-maphead"><span id="baMapTitle">GIS 관제 지도</span> <span class="sub" id="baMapSub"></span><span class="act" id="baMapAct" hidden></span></div>
       <div class="ba-mapbox" id="baMapBox"></div>
     </section>
   </div>
@@ -596,30 +604,37 @@ function renderBig(){
         (a.mock?'<span class="mockchip">모의</span>':'')+
         '<span class="sub" data-bsub></span><span class="sp"></span>'+
         (a.mock ? '<button class="btn sm" data-bmock="'+esc(a.id)+'">확인 (모의)</button>' : '<button class="btn sm" data-back="'+esc(k)+'">확인</button>')+'</div>'+
-        '<div class="ba-video"><img src="/stream/'+a.camera+'.mjpg" alt="'+esc(a.camera)+' 실영상"></div></section>'; }).join('');
+        (a.mock ? '<div class="ba-video"><div class="ba-novideo">모의 경보라 영상은 띄우지 않습니다. 지도에서 확인하세요.</div></div></section>'
+                : '<div class="ba-video"><img src="/stream/'+a.camera+'.mjpg" alt="'+esc(a.camera)+' 실영상"></div></section>'); }).join('');
   }
   show.forEach(a=>{ const el=document.querySelector('[data-bk="'+paneKey(a)+'"] [data-bsub]'), c=CAMS.find(x=>x.live===a.camera), tm=/(\d\d:\d\d(:\d\d)?)/.exec(a.since||'');
     if(!el) return;
-    if(a.mock){ el.textContent=(c?c.id:'')+' · '+a.title+(tm?' · '+tm[1]+'부터':'')+' · 영상은 실시간, 경보는 모의'; return; }
+    if(a.mock){ el.textContent=(c?c.id:'')+' · '+a.title+(tm?' · '+tm[1]+'부터':''); return; }
     const v=videoOf(a.camera);
     el.textContent=(c?c.id:'')+' · '+(a.kind==='exit'?a.object_ko:'사람')+' '+a.count+'건'+(tm?' · '+tm[1]+'부터':'')+(v?(v.mode==='scenario'?' · ▶ 시나리오 영상':' · 평소 영상'):''); });
-  placeBigMap(show.length===1 ? show[0] : null);
+  placeBigMap(show.length===1 ? show[0] : null, show.length===1 && show[0].mock);
   setHTML($('#baMore'), rest.length ? '그 밖의 경보 '+rest.length+'건: '+rest.map(a=>{ const c=CAMS.find(x=>x.live===a.camera); return esc((c?c.id:a.camera)+' '+(a.mock?'이탈 징후 (모의)':KIND_KO[a.kind])); }).join(', ') : '');
 }
 /* R20 I2: 경보가 하나면 오른쪽에 2D 지도. 지도 SVG를 복제하지 않고 옮겨 와서 같은 그리기 함수가 계속 갱신한다.
    큰 화면을 닫거나 칸이 2개 이상이 되면 원래 자리(통합 관제 지도)로 돌려놓는다. */
-function placeBigMap(p){
-  const map=$('#map'), box=$('#baMapBox'), home=$('#map2dWrap'), sec=$('#baMap');
+function placeBigMap(p, mapOnly){
+  const map=$('#map'), box=$('#baMapBox'), home=$('#map2dWrap'), sec=$('#baMap'), act=$('#baMapAct');
+  $('#baBody').classList.toggle('maponly', !!(p&&mapOnly));
+  /* R21 I4: 지도만 띄울 때는 지도 제목 줄이 경보 띠 역할을 한다 (제목, 모의 표시, 확인 버튼) */
+  $('#baMapTitle').textContent = p&&mapOnly ? '▲ '+(Z(p.zone||'forest')?Z(p.zone||'forest').name:'')+' · 이탈 징후 (Level 3)' : 'GIS 관제 지도';
+  const want = p&&mapOnly ? 'mock|'+p.id : '';
+  if(act.dataset.k!==want){ act.dataset.k=want; act.innerHTML = want ? '<span class="mockchip">◇ 모의</span><button class="btn sm" data-bmock="'+esc(p.id)+'">확인 (모의)</button>' : ''; }
+  act.hidden = !want;
   if(p){
     if(map.parentNode!==box){ closeMapPop(); box.appendChild(map); }
-    sec.hidden=false; sec.className='ba-map '+p.kind+(p.mock?' mock':''); $('#baBody').classList.add('split');
+    sec.hidden=false; sec.className='ba-map '+p.kind+(p.mock?' mock':''); $('#baBody').classList.toggle('split', !mapOnly);
     const c=CAMS.find(x=>x.live===p.camera), zid=p.zone||(c&&c.zone), z=zid&&Z(zid);
     $('#baMapSub').textContent=(c?c.id+' '+c.name:'')+(z?' · '+z.name+' 구역':'')+' · '+
-      (p.mock?'점선·빨강 ! = 코끼리 이탈 징후 (모의)':p.kind==='exit'?'빨강 ! = 이탈':'주황 ! = 사람 침입');
+      (p.mock?'점선·빨강 ! = 코끼리 이탈 징후 (모의, 영상 없음)':p.kind==='exit'?'빨강 ! = 이탈':'주황 ! = 사람 침입');
     renderMap();
   } else {
     if(map.parentNode!==home) home.insertBefore(map, home.firstChild);
-    sec.hidden=true; $('#baBody').classList.remove('split');
+    sec.hidden=true; $('#baBody').classList.remove('split'); $('#baBody').classList.remove('maponly');
   }
 }
 function setBig(open){
@@ -734,9 +749,13 @@ const camOfZone = z => { const c=CAMS.find(c=>c.zone===z); return c&&c.id; };
 const camOfAnimal = a => { const live=Object.keys(LIVE_ANIMAL).find(k=>LIVE_ANIMAL[k]===a.id), c=live&&CAMS.find(c=>c.live===live); return c?c.id:camOfZone(a.zone); };
 
 /* ---------- selection shared by all panels ---------- */
+/* R21: 첫 화면 카메라 칸 하나가 크게(한 줄 전체) 보이는 상태. 선택이 바뀌면 그 카메라가 커지고,
+   "4분할 보기"를 누르거나 다른 탭에서 통합 관제로 돌아오면 4분할로 되돌린다. */
+const HERO = {big:false};
 function select(type,id){
   S.sel = {type,id};
   const r = related();
+  HERO.big = !!r.cam;
   if(r.cam && !S.grid.includes(r.cam)) S.grid[3] = r.cam;
   renderAll();
 }
@@ -1317,7 +1336,9 @@ function renderCams(){
   if(VIEW!=='dash') return setHTML($('#cams'),'');
   const r=related();
   /* R14: 첫 화면 맨 위 카메라. 누르면 카메라 탭에서 그 카메라 한 화면으로 간다. */
-  setHTML($('#cams'), S.grid.map(cid=>camTile(cid, r.cam===cid, 'data-hero').replace('</button>','<span class="go">크게 보기 ›</span></button>')).join(''));
+  const big = HERO.big && S.grid.includes(r.cam);
+  setHTML($('#cams'), S.grid.map(cid=>camTile(cid, big && r.cam===cid, 'data-hero').replace('</button>','<span class="go">크게 보기 ›</span></button>')).join(''));
+  $('#heroGrid').hidden = !big;
 }
 
 /* ---------- camera-only view ---------- */
@@ -1581,7 +1602,9 @@ function renderAi(){
     : '<div class="panel" style="padding:14px;color:var(--muted)">'+(AIV.state==='ok'?(all.length?'필터 조건에 맞는 기록이 없습니다.':'이 날짜에 AI에 보낸 요청이 없습니다. 서버를 --ollama 로 켜거나 CSV 기록 탭에서 "AI 판단 요청"을 누르면 기록이 생깁니다.'):'표시할 기록이 없습니다.')+'</div>');
 }
 function setView(v){
+  const before = VIEW;
   VIEW = ['cam','csv','ai'].includes(v) ? v : 'dash';
+  if(VIEW==='dash' && before!=='dash') HERO.big = false;   /* R21 I1: 다른 탭에서 돌아오면 4분할 */
   try{ history.replaceState(null,'',VIEW==='cam'?'#cameras':VIEW==='csv'?'#csv':VIEW==='ai'?'#ai':'#'); }catch(err){}
   renderAll();
   if(VIEW==='csv'){ $('#csvDay').value=CSVV.day; loadCsv(); }
@@ -1836,10 +1859,12 @@ $('#tl').addEventListener('click',ev=>{ const r=$('#tl').getBoundingClientRect()
 $('#q').addEventListener('input',renderAnimals); $('#riskF').addEventListener('change',renderAnimals); $('#showDone').addEventListener('change',renderFeed);
 $('#scnPlay').addEventListener('click',startScenario);
 $('#baClose').addEventListener('click',closeBig);
+$('#heroGrid').addEventListener('click',()=>{ HERO.big=false; renderCams(); });   /* R21 I2 */
 $('#cams').addEventListener('click',e=>{ const t=e.target.closest('[data-hero]'); if(!t) return;
   e.stopPropagation(); CV.cam=t.dataset.hero; CV.layout='one'; CV.edit=null; setView('cam'); },true);
 $('#baOpen').addEventListener('click',()=>setBig(true));
 document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&BIG.open) closeBig(); });
+$('#baMap').addEventListener('click',e=>{ const m=e.target.closest('[data-bmock]'); if(m){ BIG.mockOff.add(m.dataset.bmock); renderBig(); } });
 $('#baGrid').addEventListener('click',e=>{ const m=e.target.closest('[data-bmock]');
   if(m){ BIG.mockOff.add(m.dataset.bmock); renderBig(); return; }   /* R20: 모의 경보 확인 = 큰 화면에서 내림 (모의 사건 흐름은 그대로) */
   const b=e.target.closest('[data-back]'); if(!b) return;
