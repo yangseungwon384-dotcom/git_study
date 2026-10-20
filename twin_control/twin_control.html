@@ -97,6 +97,12 @@ body.em .grid{grid-template-columns:260px minmax(0,1fr) 350px}
 .ba-maphead .act[hidden]{display:none}
 .ba-maphead .mockchip{font-size:13px;font-weight:700;border:2px dashed var(--crit);color:var(--crit);border-radius:999px;padding:0 8px}
 .ba-maphead .btn{white-space:nowrap}
+.rpt-save{font-size:13px;padding:6px 10px;border-radius:6px;background:var(--panel-2);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.rpt-save.ok{color:var(--ok)} .rpt-save.bad{color:var(--crit)}
+.rpt-list{display:flex;flex-direction:column}
+.rpt-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:8px 2px;border-bottom:1px solid var(--line);font-size:13px}
+.rpt-row:last-child{border-bottom:0}
+.rpt-row .when{font-variant-numeric:tabular-nums;color:var(--muted)}
 .ba-novideo{color:var(--muted);font-size:14px;text-align:center;padding:16px}
 .ba-pane.mock .ba-banner{background:repeating-linear-gradient(135deg,var(--crit) 0 14px,#d94a4a 14px 28px)}
 .ba-banner .mockchip{font-size:13px;font-weight:700;border:2px dashed #fff;border-radius:999px;padding:0 8px}
@@ -361,6 +367,11 @@ a.btn[aria-disabled="true"]{opacity:.45;pointer-events:none}
             <tbody id="csvBody"></tbody>
           </table>
         </div>
+      </section>
+      <section class="panel mockp" id="rptPanel" aria-label="모의 리포트">
+        <h2>모의 리포트 <span class="chip-mock">◇ 모의 · 사건 기록과 별도</span><small>코끼리 모의 시나리오가 끝날 때 뜨는 사후 보고서 초안</small>
+          <span style="flex:1"></span><a class="btn sm" id="rptDl" href="/api/scenario-reports.csv">모의 리포트 CSV 내려받기</a></h2>
+        <div class="body"><div class="rpt-list" id="rptList"><span class="sub">불러오는 중…</span></div></div>
       </section>
     </div>
   </section>
@@ -1448,6 +1459,7 @@ function edAction(kind){
 const today = () => { const d=new Date(); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); };
 const CSVV = {day:today(), rows:[], state:'idle', tick:0};
 function loadCsv(){
+  loadReports();
   if(!LIVE.on){ CSVV.state='offline'; return renderCsv(); }
   const day=CSVV.day;
   fetch('/api/events?day='+encodeURIComponent(day)).then(r=>r.json().then(d=>({ok:r.ok,d}))).then(res=>{
@@ -1775,9 +1787,45 @@ function renderRadio(){
 /* ---------- dialogs ---------- */
 function dialog(html){ $('#dlg').innerHTML=html; $('#ov').hidden=false; const b=$('#dlg button'); if(b) b.focus(); }
 function closeDialog(){ $('#ov').hidden=true; }
+/* R23: 사후 보고서를 서버의 scenario_reports.csv에 한 번만 저장한다 (실행 ID로 중복 방지). 사건 DB·AI 요청에는 넣지 않는다.
+   저장에 실패해도 보고서 창은 그대로 보이고, 창 안에서 다시 시도할 수 있다. */
+const REPORT = {last:null, list:[]};
+const newRunId = () => 'run-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);
 function showReport(){
+  REPORT.last = {run_id:S.runId||newRunId(), scenario:S.runId?'코끼리 이탈 징후 (모의)':'수동 비상 발령', title:'사후 보고서 초안',
+                 entries:S.journal.map(j=>({t:fmt(j.t), x:j.x}))};
+  S.runId = null;   // 다음 비상은 새 보고서
   dialog('<h3>사후 보고서 초안</h3><div style="color:var(--muted)">모의 시나리오 기록을 시간순으로 묶었습니다. 영상 클립과 통신 녹음 첨부는 4단계 범위입니다.</div><ol class="num">'+
-    S.journal.map(j=>'<li>'+fmt(j.t)+'  '+j.x+'</li>').join('')+'</ol><div class="btns"><button class="btn primary" data-dlg="close">닫기</button></div>');
+    S.journal.map(j=>'<li>'+fmt(j.t)+'  '+j.x+'</li>').join('')+'</ol><div class="rpt-save" id="rptSave" role="status">CSV 기록 탭에 저장 중…</div><div class="btns"><button class="btn primary" data-dlg="close">닫기</button></div>');
+  saveReport();
+}
+function saveReport(){
+  const r=REPORT.last, el=()=>$('#rptSave');
+  if(!r) return;
+  if(!LIVE.on){ if(el()){ el().className='rpt-save bad'; el().textContent='분석 서버에 연결되지 않아 저장하지 못했습니다.'; } return; }
+  post('/api/scenario-reports', r).then(res=>{
+    if(!el()) return;
+    el().className='rpt-save ok';
+    el().textContent = res.duplicate ? '✓ 이미 저장된 보고서입니다 (CSV 기록 탭 › 모의 리포트).' : '✓ 저장됨: CSV 기록 탭 › 모의 리포트 ('+res.lines+'줄, '+res.saved_at+')';
+  }).catch(err=>{
+    if(!el()) return;
+    el().className='rpt-save bad';
+    el().innerHTML='저장 실패 ('+esc(err.message)+'). <button class="btn sm" data-rptretry>다시 시도</button>';
+  });
+}
+function loadReports(){
+  if(!LIVE.on) return setHTML($('#rptList'),'<span class="sub">분석 서버에 연결되면 보입니다.</span>');
+  fetch('/api/scenario-reports',{cache:'no-store'}).then(r=>r.ok?r.json():Promise.reject(new Error('HTTP '+r.status))).then(d=>{
+    REPORT.list=d.reports||[];
+    setHTML($('#rptList'), REPORT.list.length ? REPORT.list.map(r=>'<div class="rpt-row"><span class="when">'+esc(r.saved_at)+'</span><span>'+esc(r.title)+' · '+esc(r.scenario)+'</span>'+
+      '<span class="sub">'+r.entries.length+'줄</span><button class="btn sm" data-rptview="'+esc(r.run_id)+'">보기</button></div>').join('')
+      : '<span class="sub">아직 저장된 모의 리포트가 없습니다. 코끼리 모의 시나리오를 끝까지 돌리면 비상 해제 때 저장됩니다.</span>');
+  }).catch(err=>setHTML($('#rptList'),'<span class="sub">모의 리포트를 불러오지 못했습니다 ('+esc(err.message)+'). 새로고침을 눌러 주세요.</span>'));
+}
+function viewReport(id){
+  const r=REPORT.list.find(x=>x.run_id===id); if(!r) return;
+  dialog('<h3>'+esc(r.title)+' <span class="chip-mock">◇ 모의 · 저장본</span></h3><div style="color:var(--muted)">'+esc(r.scenario)+' · 저장 '+esc(r.saved_at)+'</div><ol class="num">'+
+    r.entries.map(e=>'<li>'+esc(e.t)+'  '+esc(e.x)+'</li>').join('')+'</ol><div class="btns"><button class="btn primary" data-dlg="close">닫기</button></div>');
 }
 
 /* ---------- scenario player ---------- */
@@ -1798,7 +1846,7 @@ const SCN = {
 function startScenario(){
   const v=$('#scnSel').value;
   if(v.startsWith('live:')) return startLiveScenario(v.slice(5));
-  init(); S.scn={id:$('#scnSel').value,start:S.t,cur:0}; S.speed=+$('#scnSpeed').value; S.step='시나리오 시작.'; renderAll();
+  init(); S.scn={id:$('#scnSel').value,start:S.t,cur:0}; S.runId=newRunId(); S.speed=+$('#scnSpeed').value; S.step='시나리오 시작.'; renderAll();
 }
 
 /* ---------- simulation tick ---------- */
@@ -1826,6 +1874,8 @@ function renderAll(){ renderTop(); renderLayers(); renderAnimals(); liveVitals()
 document.addEventListener('click',ev=>{
   const t=ev.target, c=s=>t.closest(s);
   let el;
+  if(c('[data-rptretry]')) return saveReport();
+  if((el=c('[data-rptview]'))) return viewReport(el.dataset.rptview);
   if((el=c('[data-mapscn]'))){ closeMapPop(); return startLiveScenario(el.dataset.mapscn); }
   if(c('[data-mappop]')) return closeMapPop();
   if(c('#mapPop')) return;
