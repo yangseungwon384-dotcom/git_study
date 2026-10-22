@@ -6,7 +6,7 @@
 
 | 위치 | 내용 |
 | --- | --- |
-| `twin_control/` | 관제 서버와 화면 (v23) |
+| `twin_control/` | 관제 서버와 화면 (v24) |
 | `zoo_safe/` | 분석 엔진 |
 | `zoo_vision.py`, `zoo_safety.py`, `safezoo.css` | 엔진이 읽는 원본 카메라 설정과 구역 판정 코드 |
 | `elephant_cctv.mp4`, `giraffe_cctv.mp4`, `tiger_cctv.mp4`, `redpanda_cctv.mp4` | 카메라 4대 영상 (기린·레서판다는 실영상 시나리오의 위험 영상) |

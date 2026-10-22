@@ -764,11 +764,16 @@ const camOfAnimal = a => { const live=Object.keys(LIVE_ANIMAL).find(k=>LIVE_ANIM
    "4분할 보기"를 누르거나 다른 탭에서 통합 관제로 돌아오면 4분할로 되돌린다.
    R22: 시나리오·자동 전환처럼 화면이 스스로 고른 선택(auto)은 카메라를 키우지 않고 4분할을 유지한다. */
 const HERO = {big:false};
+/* R24: 실영상 분석 중에는 모의 카메라(CAM-03·04·12)를 카메라 칸에 넣거나 키우지 않는다.
+   모의 카메라 칸은 가짜 박스를 그린 모의 화면이라, 실제 영상처럼 보이면 헷갈린다. */
+const isMockCam = id => { const c=CAMS.find(x=>x.id===id); return !!(LIVE.on && c && !c.live); };
+const liveCamOfZone = z => { const c=CAMS.find(x=>x.zone===z && x.live); return c&&c.id; };
 function select(type,id,auto){
   S.sel = {type,id};
   const r = related();
-  HERO.big = !auto && !!r.cam;
-  if(r.cam && !S.grid.includes(r.cam)) S.grid[3] = r.cam;
+  const mock = isMockCam(r.cam);
+  HERO.big = !auto && !!r.cam && !mock;
+  if(r.cam && !mock && !S.grid.includes(r.cam)) S.grid[3] = r.cam;
   renderAll();
 }
 function related(){
@@ -1898,9 +1903,13 @@ document.addEventListener('click',ev=>{
   if((el=c('[data-cvcam]'))){ if(CV.layout==='one') CV.layout='grid'; else { CV.layout='one'; CV.cam=el.dataset.cvcam; } return renderAll(); }
   if((el=c('[data-layer]'))){ S.layers[el.dataset.layer]=!S.layers[el.dataset.layer]; return renderAll(); }
   if((el=c('[data-animal]'))) return select('animal',el.dataset.animal);
-  if((el=c('[data-cam]'))){ select('cam',el.dataset.cam); if(c('#map')) openMapPop(ev,'cam',el.dataset.cam); return; }
+  if((el=c('[data-cam]'))){
+    if(c('#map') && isMockCam(el.dataset.cam)) return;   /* R24: 지도의 모의 카메라는 눌러도 반응하지 않는다 */
+    select('cam',el.dataset.cam); if(c('#map')) openMapPop(ev,'cam',el.dataset.cam); return; }
   if((el=c('[data-event]'))) return select('event',el.dataset.event);
-  if((el=c('[data-zone]'))){ select('zone',el.dataset.zone); if(c('#map')) openMapPop(ev,'zone',el.dataset.zone); return; }
+  if((el=c('[data-zone]'))){
+    if(c('#map') && LIVE.on && !liveCamOfZone(el.dataset.zone)) return;   /* R24: 실영상 카메라가 없는 구역(바람의 언덕·메인광장·카약 탑승장)은 반응하지 않는다 */
+    select('zone',el.dataset.zone); if(c('#map')) openMapPop(ev,'zone',el.dataset.zone); return; }
   if((el=c('[data-ch]'))){ const ch=S.ch.find(x=>x.id===el.dataset.ch); if(ch.st==='off') radio(ch.id+' 오프라인: 송신 실패, 유선 인터컴으로 연락하세요'); else { ch.st='on'; radio('관제 → '+ch.id+' '+ch.n+': 송신'); } return renderRadio(); }
   if(t.id==='live'){ S.viewT=null; return renderTimeline(); }
   if(t.id==='ov') closeDialog();
